@@ -32,7 +32,6 @@ export default function App() {
   const [report, setReport] = useState<ApplyReport | null>(null);
 
   const [loading, setLoading] = useState(false);
-  const [applying, setApplying] = useState(false);
   const [savingSettings, setSavingSettings] = useState(false);
   const [savingCreds, setSavingCreds] = useState(false);
   const [checking, setChecking] = useState(false);
@@ -42,6 +41,22 @@ export default function App() {
     setToast(msg);
     window.setTimeout(() => setToast(null), 3000);
   }, []);
+
+  const reloadAccounts = useCallback(async () => {
+    setLoading(true);
+    try {
+      const list = await api.listAccounts();
+      setAccounts(list);
+      // 默认勾选「需重授权」的账号
+      setSelected(new Set(list.filter((a) => a.needs_reauth).map((a) => a.id)));
+      const problems = list.filter((a) => a.needs_reauth).length;
+      notify(`已加载 ${list.length} 个账号，其中 ${problems} 个需重授权`);
+    } catch (e) {
+      notify(String(e));
+    } finally {
+      setLoading(false);
+    }
+  }, [notify]);
 
   // ---------- 初始化 ----------
   useEffect(() => {
@@ -73,6 +88,15 @@ export default function App() {
       if (e.event === "done") {
         setResult(e.result);
         setReport(null);
+      } else if (e.event === "preview") {
+        // 一键流程自动衔接：写回前的匹配计划
+        setReport(e.report);
+      } else if (e.event === "apply") {
+        // 一键流程自动衔接：写回结果
+        setReport(e.report);
+        const ok = e.report.outcomes.filter((o) => o.ok).length;
+        notify(`写回完成：成功 ${ok} / 失败 ${e.report.outcomes.length - ok}`);
+        void reloadAccounts();
       } else if (e.event === "error") {
         notify(e.msg);
       } else if (e.event === "exit") {
@@ -86,7 +110,7 @@ export default function App() {
       dead = true;
       if (un) un();
     };
-  }, [notify]);
+  }, [notify, reloadAccounts]);
 
   // ---------- 派生数据 ----------
   const visibleAccounts = useMemo(() => {
@@ -109,22 +133,6 @@ export default function App() {
   );
 
   // ---------- 动作 ----------
-  const reloadAccounts = useCallback(async () => {
-    setLoading(true);
-    try {
-      const list = await api.listAccounts();
-      setAccounts(list);
-      // 默认勾选「需重授权」的账号
-      setSelected(new Set(list.filter((a) => a.needs_reauth).map((a) => a.id)));
-      const problems = list.filter((a) => a.needs_reauth).length;
-      notify(`已加载 ${list.length} 个账号，其中 ${problems} 个需重授权`);
-    } catch (e) {
-      notify(String(e));
-    } finally {
-      setLoading(false);
-    }
-  }, [notify]);
-
   const saveSettings = useCallback(async () => {
     if (!settings) return;
     setSavingSettings(true);
@@ -219,36 +227,6 @@ export default function App() {
       notify(String(e));
     }
   }, [notify]);
-
-  const preview = useCallback(async () => {
-    const raw = result?.cpaPage?.output;
-    if (!raw) return;
-    setApplying(true);
-    try {
-      setReport(await api.applyResult(raw, false));
-    } catch (e) {
-      notify(String(e));
-    } finally {
-      setApplying(false);
-    }
-  }, [result, notify]);
-
-  const applyNow = useCallback(async () => {
-    const raw = result?.cpaPage?.output;
-    if (!raw) return;
-    setApplying(true);
-    try {
-      const r = await api.applyResult(raw, true);
-      setReport(r);
-      const ok = r.outcomes.filter((o) => o.ok).length;
-      notify(`写回完成：成功 ${ok} / 失败 ${r.outcomes.length - ok}`);
-      await reloadAccounts();
-    } catch (e) {
-      notify(String(e));
-    } finally {
-      setApplying(false);
-    }
-  }, [result, notify, reloadAccounts]);
 
   const clearResult = useCallback(() => {
     setResult(null);
@@ -349,11 +327,8 @@ export default function App() {
             events={events}
             result={result}
             report={report}
-            applying={applying}
             onStart={start}
             onCancel={cancel}
-            onPreview={preview}
-            onApply={applyNow}
             onClear={clearResult}
             onOpenUrl={openUrl}
           />

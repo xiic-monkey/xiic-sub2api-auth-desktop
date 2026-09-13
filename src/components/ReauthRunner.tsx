@@ -6,11 +6,8 @@ interface Props {
   events: ReauthEvent[];
   result: FetchResult | null;
   report: ApplyReport | null;
-  applying: boolean;
   onStart: () => void;
   onCancel: () => void;
-  onPreview: () => void;
-  onApply: () => void;
   onClear: () => void;
   onOpenUrl: (url: string) => void;
 }
@@ -27,6 +24,8 @@ const STEP_LABEL: Record<string, string> = {
   "poll-done": "轮询结束",
   copy: "复制全部并读剪切板",
   cpa: "CPA 转换",
+  apply: "匹配账号并写回",
+  applied: "写回完成",
 };
 
 function lineOf(e: ReauthEvent): { text: string; cls: string } | null {
@@ -62,11 +61,8 @@ export default function ReauthRunner({
   events,
   result,
   report,
-  applying,
   onStart,
   onCancel,
-  onPreview,
-  onApply,
   onClear,
   onOpenUrl,
 }: Props) {
@@ -74,6 +70,8 @@ export default function ReauthRunner({
   const lastStep = steps.length > 0 ? steps[steps.length - 1].step : "";
   const hasClipboard = !!result?.clipboard;
   const hasCpaOutput = !!result?.cpaPage?.output;
+  // 一键流程：fetch 结束后后端会自动 preview + apply，这里只反映状态
+  const applying = running && lastStep === "apply";
 
   return (
     <section className="runner">
@@ -160,18 +158,23 @@ export default function ReauthRunner({
             </span>
             <div className="actions">
               {result.cpaPage && (
-                <button className="ghost" onClick={() => onOpenUrl(result.cpaPage!.url)}>
-                  打开 CPA 页
+                <button
+                  className="ghost"
+                  onClick={() => onOpenUrl(result.cpaPage!.url)}
+                  title="可选查看；流程已自动访问 CPA 页并读取输出，无需手动操作"
+                >
+                  查看 CPA 页
                 </button>
               )}
-              <button
-                className="primary"
-                onClick={onPreview}
-                disabled={applying || !hasCpaOutput}
-                title={hasCpaOutput ? "" : "没有拿到 CPA 输出，无法写回"}
-              >
-                {applying ? "处理中…" : "预览写回（dry-run）"}
-              </button>
+              <span className="tiny muted">
+                {applying
+                  ? "自动匹配并写回中…"
+                  : !hasCpaOutput
+                    ? "未拿到 CPA 输出"
+                    : report
+                      ? "已自动写回（含恢复调度）"
+                      : ""}
+              </span>
             </div>
           </div>
 
@@ -202,15 +205,11 @@ export default function ReauthRunner({
             <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
               <div className="row-between">
                 <span className="tiny">
-                  匹配 {report.plans.length} 个账号
+                  {report.dry_run ? "写回预览（自动执行中）" : "写回结果"}：匹配{" "}
+                  {report.plans.length} 个账号
                   {report.skipped.length > 0 && ` · 跳过 ${report.skipped.length} 项`}
                   {!report.dry_run && ` · 成功 ${report.outcomes.filter((o) => o.ok).length}`}
                 </span>
-                {report.dry_run && (
-                  <button className="primary" onClick={onApply} disabled={applying}>
-                    {applying ? "写回中…" : "确认写回"}
-                  </button>
-                )}
               </div>
 
               {report.plans.map((p) => {

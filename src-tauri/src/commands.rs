@@ -6,7 +6,7 @@
 //! - 敏感值（token）只经事件 / 后端内部流转，`PlanItem.credentials` 不随 JSON 回传前端。
 
 use std::path::{Path, PathBuf};
-use std::sync::atomic::AtomicBool;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -323,6 +323,7 @@ pub async fn start_reauth(
             }),
         };
         let app_run = app.clone();
+        let cancel_check = cancel.clone();
         let res = tauri::async_runtime::spawn_blocking(move || {
             browser::fetch_stream_hooks(
                 &settings.gate_url,
@@ -338,13 +339,132 @@ pub async fn start_reauth(
         .await
         .map_err(|e| format!("任务调度失败：{}", e));
 
-        app_run.state::<AppState>().clear_job();
         match res {
             Ok(Ok(val)) => {
                 emit(
                     &app_run,
                     serde_json::json!({ "event": "done", "result": val }),
                 );
+
+                // —— 自动衔接：CPA 输出 → dry-run 预览 → 真正写回（含恢复调度开关）——
+                // 不再让用户手动点「打开 CPA 页 / 预览写回 / 确认写回」。预览信息照常
+                // emit 到进度里（`preview` / `apply` 事件），前端直接展示。
+                let cpa_output = val
+                    .get("cpaPage")
+                    .and_then(|v| v.get("output"))
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.trim().to_string())
+                    .filter(|s| !s.is_empty());
+
+                if cancel_check.load(Ordering::Relaxed) {
+                    emit(
+                        &app_run,
+                        serde_json::json!({ "event": "log", "msg": "已取消，跳过自动写回" }),
+                    );
+                } else if let Some(raw) = cpa_output {
+                    match app_run.state::<AppState>().settings_snapshot().to_config() {
+                        Ok(cfg) => {
+                            // 1) dry-run：先算匹配计划并展示
+                            emit(
+                                &app_run,
+                                serde_json::json!({ "event": "step", "step": "apply", "msg": "匹配账号并预览写回" }),
+                            );
+                            let cfg1 = cfg.clone();
+                            let raw1 = raw.clone();
+                            let dry = tauri::async_runtime::spawn_blocking(
+                                move || -> Result<ApplyReport, String> {
+                                    let mut client =
+                                        Sub2ApiClient::login(&cfg1).map_err(|e| format!("{:#}", e))?;
+                                    apply_value(&mut client, &raw1, false, None, None)
+                                        .map_err(|e| format!("{:#}", e))
+                                },
+                            )
+                            .await;
+
+                            match dry {
+                                Ok(Ok(preview)) => {
+                                    let n = preview.plans.len();
+                                    let skipped = preview.skipped.len();
+                                    emit(
+                                        &app_run,
+                                        serde_json::json!({ "event": "preview", "report": preview }),
+                                    );
+                                    emit(
+                                        &app_run,
+                                        serde_json::json!({
+                                            "event": "log",
+                                            "msg": format!(
+                                                "预览：匹配 {} 个账号{}；自动写回并恢复调度开关…",
+                                                n,
+                                                if skipped > 0 {
+                                                    format!("，跳过 {} 项", skipped)
+                                                } else {
+                                                    String::new()
+                                                }
+                                            ),
+                                        }),
+                                    );
+
+                                    // 2) 真正写回
+                                    let applied = tauri::async_runtime::spawn_blocking(
+                                        move || -> Result<ApplyReport, String> {
+                                            let mut client = Sub2ApiClient::login(&cfg)
+                                                .map_err(|e| format!("{:#}", e))?;
+                                            apply_value(&mut client, &raw, true, None, None)
+                                                .map_err(|e| format!("{:#}", e))
+                                        },
+                                    )
+                                    .await;
+
+                                    match applied {
+                                        Ok(Ok(report)) => {
+                                            let ok = report.outcomes.iter().filter(|o| o.ok).count();
+                                            let bad = report.outcomes.len() - ok;
+                                            emit(
+                                                &app_run,
+                                                serde_json::json!({ "event": "apply", "report": report }),
+                                            );
+                                            emit(
+                                                &app_run,
+                                                serde_json::json!({
+                                                    "event": "step",
+                                                    "step": "applied",
+                                                    "msg": format!("写回完成：成功 {} / 失败 {}", ok, bad),
+                                                }),
+                                            );
+                                        }
+                                        Ok(Err(e)) => emit(
+                                            &app_run,
+                                            serde_json::json!({ "event": "error", "msg": format!("自动写回失败：{}", e) }),
+                                        ),
+                                        Err(e) => emit(
+                                            &app_run,
+                                            serde_json::json!({ "event": "error", "msg": format!("写回任务调度失败：{}", e) }),
+                                        ),
+                                    }
+                                }
+                                Ok(Err(e)) => emit(
+                                    &app_run,
+                                    serde_json::json!({ "event": "error", "msg": format!("预览失败（无匹配账号？）：{}", e) }),
+                                ),
+                                Err(e) => emit(
+                                    &app_run,
+                                    serde_json::json!({ "event": "error", "msg": format!("预览任务调度失败：{}", e) }),
+                                ),
+                            }
+                        }
+                        Err(e) => emit(
+                            &app_run,
+                            serde_json::json!({ "event": "error", "msg": format!("连接配置无效，跳过自动写回：{}", e) }),
+                        ),
+                    }
+                } else {
+                    emit(
+                        &app_run,
+                        serde_json::json!({ "event": "log", "msg": "没有拿到 CPA 输出，跳过自动写回" }),
+                    );
+                }
+
                 emit(
                     &app_run,
                     serde_json::json!({ "event": "exit", "code": 0, "success": true }),
@@ -372,6 +492,8 @@ pub async fn start_reauth(
                 );
             }
         }
+        // 整个流程（含自动写回）结束后才释放任务槽
+        app_run.state::<AppState>().clear_job();
     });
     Ok(count)
 }

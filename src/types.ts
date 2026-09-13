@@ -90,6 +90,10 @@ export type ReauthEvent =
     }
   | { event: "log"; msg: string }
   | { event: "done"; result: FetchResult }
+  /** 自动衔接：写回前的匹配计划（dry-run） */
+  | { event: "preview"; report: ApplyReport }
+  /** 自动衔接：真正写回后的结果 */
+  | { event: "apply"; report: ApplyReport }
   | { event: "error"; msg: string; errors?: string[] }
   | { event: "exit"; code: number | null; success?: boolean }
   | { event: "raw"; line: string };
