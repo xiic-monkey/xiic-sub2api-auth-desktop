@@ -2,18 +2,18 @@
 //!
 //! 设计要点：
 //! - 阻塞型 API 调用放进 `spawn_blocking`，不卡 UI 线程；
-//! - 重授权 worker 用 `--progress` 输出 NDJSON，逐行转发成 Tauri 事件 `reauth:event`；
+//! - 重授权走核心库的原生浏览器自动化（fetch_stream_hooks），进度经回调转发成 Tauri 事件 `reauth:event`；
 //! - 敏感值（token）只经事件 / 后端内部流转，`PlanItem.credentials` 不随 JSON 回传前端。
 
 use std::path::{Path, PathBuf};
-use std::process::Stdio;
+use std::sync::atomic::AtomicBool;
+use std::sync::Arc;
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager, State};
-use tokio::io::{AsyncBufReadExt, BufReader};
-use tokio::process::Command as TokioCommand;
 
+use sub2api_operator::browser;
 use sub2api_operator::commands::reauth::{apply_value, ApplyReport};
 use sub2api_operator::config::Config;
 use sub2api_operator::models::Account;
@@ -117,9 +117,9 @@ fn save_settings_to(data_dir: &Path, s: &Settings) -> anyhow::Result<()> {
 pub struct AppInfo {
     pub version: String,
     pub data_dir: String,
-    pub worker_root: String,
-    pub worker_script: String,
-    pub worker_ready: bool,
+    /// 当前引擎探测到的浏览器可执行文件（未找到为空）
+    pub browser_path: String,
+    pub browser_ready: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -188,43 +188,27 @@ pub struct CredentialView {
 
 #[tauri::command]
 pub fn app_info(state: State<'_, AppState>) -> AppInfo {
-    let worker_script = state.worker_script();
+    let engine = state.settings_snapshot().browser_engine;
+    let path = browser::detect_executable(Some(&engine)).ok();
     AppInfo {
         version: env!("CARGO_PKG_VERSION").to_string(),
         data_dir: state.data_dir.display().to_string(),
-        worker_root: state.worker_root.display().to_string(),
-        worker_script: worker_script.display().to_string(),
-        worker_ready: worker_script.exists(),
+        browser_path: path
+            .as_ref()
+            .map(|p| p.display().to_string())
+            .unwrap_or_default(),
+        browser_ready: path.is_some(),
     }
 }
 
 #[tauri::command]
-pub async fn check_engines(state: State<'_, AppState>) -> Result<EngineStatus, String> {
-    let worker = state.worker_script();
-    if !worker.exists() {
-        return Err(format!(
-            "找不到浏览器 worker：{}\n（开发期请确认同级存在 xiic-sub2api-authorize/browser-worker/）",
-            worker.display()
-        ));
-    }
-    let out = tauri::async_runtime::spawn_blocking(move || {
-        std::process::Command::new("node")
-            .arg(&worker)
-            .arg("check")
-            .output()
+pub async fn check_engines() -> Result<EngineStatus, String> {
+    tauri::async_runtime::spawn_blocking(|| {
+        let v = browser::check_engines();
+        serde_json::from_value::<EngineStatus>(v).map_err(|e| format!("解析引擎检测结果失败：{}", e))
     })
     .await
     .map_err(|e| format!("任务调度失败：{}", e))?
-    .map_err(|e| format!("执行 node 失败（确认已安装 Node.js）：{}", e))?;
-
-    let stdout = String::from_utf8_lossy(&out.stdout);
-    serde_json::from_str::<EngineStatus>(&stdout).map_err(|e| {
-        format!(
-            "解析引擎检测结果失败：{}\n原始输出：{}",
-            e,
-            stdout.chars().take(300).collect::<String>()
-        )
-    })
 }
 
 #[tauri::command]
@@ -307,16 +291,14 @@ pub async fn start_reauth(
     if emails.is_empty() {
         return Err("没有选中任何邮箱".to_string());
     }
-    if state.pid().is_some() {
+    if state.job().is_some() {
         return Err("已有重授权任务在跑，请先等它结束或点「终止」".to_string());
     }
     let settings = state.settings_snapshot();
     settings.to_config().map_err(|e| e.to_string())?; // 提前校验连接配置
-    let worker = state.worker_script();
-    if !worker.exists() {
-        return Err(format!("找不到浏览器 worker：{}", worker.display()));
-    }
-    let root = state.worker_root.clone();
+    let engine = settings.browser_engine.clone();
+    browser::detect_executable(Some(&engine))
+        .map_err(|e| format!("{:#}", e))?; // 提前确认浏览器存在
 
     // CDK 复用本地凭证库
     let cdk = store::load()
@@ -326,132 +308,77 @@ pub async fn start_reauth(
         .filter(|s| !s.is_empty());
 
     let count = emails.len();
-    let app2 = app.clone();
+    let cancel = Arc::new(AtomicBool::new(false));
+    state.set_job(cancel.clone());
+
     tauri::async_runtime::spawn(async move {
-        run_worker(app2, worker, root, settings, emails, cdk).await;
-    });
-    Ok(count)
-}
+        let app2 = app.clone();
+        let app3 = app2.clone();
+        let job = browser::FetchHooks {
+            log: Arc::new(move |l: String| {
+                emit(&app3, serde_json::json!({ "event": "log", "msg": l }));
+            }),
+            step: Arc::new(move |step: &'static str, msg: String| {
+                emit(&app2, serde_json::json!({ "event": "step", "step": step, "msg": msg }));
+            }),
+        };
+        let app_run = app.clone();
+        let res = tauri::async_runtime::spawn_blocking(move || {
+            browser::fetch_stream_hooks(
+                &settings.gate_url,
+                &emails,
+                cdk.as_deref(),
+                settings.max_seconds * 1000,
+                Some(&settings.cpa_url),
+                Some(&settings.browser_engine),
+                &job,
+                Some(&cancel),
+            )
+        })
+        .await
+        .map_err(|e| format!("任务调度失败：{}", e));
 
-async fn run_worker(
-    app: AppHandle,
-    worker: PathBuf,
-    root: PathBuf,
-    s: Settings,
-    emails: Vec<String>,
-    cdk: Option<String>,
-) {
-    let mut cmd = TokioCommand::new("node");
-    cmd.arg(&worker)
-        .arg("fetch")
-        .arg(&s.gate_url)
-        .arg("--emails")
-        .arg(emails.join("\n"))
-        .arg("--browser")
-        .arg(&s.browser_engine)
-        .arg("--progress")
-        .arg("--max")
-        .arg((s.max_seconds * 1000).to_string())
-        .arg("--then-open")
-        .arg(&s.cpa_url)
-        .env("SUB2OP_ROOT", &root)
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
-    if let Some(c) = cdk.as_deref() {
-        cmd.arg("--cdk").arg(c);
-    }
-
-    emit(
-        &app,
-        serde_json::json!({
-            "event": "step", "step": "spawn",
-            "msg": format!("启动浏览器自动化（引擎 {}，{} 个邮箱）", s.browser_engine, emails.len()),
-        }),
-    );
-
-    let mut child = match cmd.spawn() {
-        Ok(c) => c,
-        Err(e) => {
-            emit(
-                &app,
-                serde_json::json!({ "event": "error", "msg": format!("启动 node 失败：{}", e) }),
-            );
-            emit(&app, serde_json::json!({ "event": "exit", "code": null }));
-            return;
-        }
-    };
-
-    let pid = child.id();
-    // 记录 pid 供「终止」使用
-    if let Some(p) = pid {
-        app.state::<AppState>().set_pid(Some(p));
-    }
-
-    let stdout = child.stdout.take();
-    let stderr = child.stderr.take();
-
-    // stdout：NDJSON 进度事件，原样透传
-    let app_out = app.clone();
-    let t_out = tokio::spawn(async move {
-        if let Some(out) = stdout {
-            let mut lines = BufReader::new(out).lines();
-            while let Ok(Some(line)) = lines.next_line().await {
-                let line = line.trim();
-                if line.is_empty() {
-                    continue;
-                }
-                let v = serde_json::from_str::<serde_json::Value>(line)
-                    .unwrap_or_else(|_| serde_json::json!({ "event": "raw", "line": line }));
-                emit(&app_out, v);
-            }
-        }
-    });
-
-    // stderr：人类可读日志（poll 明细等）
-    let app_err = app.clone();
-    let t_err = tokio::spawn(async move {
-        if let Some(err) = stderr {
-            let mut lines = BufReader::new(err).lines();
-            while let Ok(Some(line)) = lines.next_line().await {
-                if line.trim().is_empty() {
-                    continue;
-                }
+        app_run.state::<AppState>().clear_job();
+        match res {
+            Ok(Ok(val)) => {
                 emit(
-                    &app_err,
-                    serde_json::json!({ "event": "log", "msg": line.trim() }),
+                    &app_run,
+                    serde_json::json!({ "event": "done", "result": val }),
+                );
+                emit(
+                    &app_run,
+                    serde_json::json!({ "event": "exit", "code": 0, "success": true }),
+                );
+            }
+            Ok(Err(e)) => {
+                let cancelled = format!("{:#}", e).contains("已取消");
+                emit(
+                    &app_run,
+                    serde_json::json!({
+                        "event": "error",
+                        "msg": if cancelled { "已取消".to_string() } else { format!("{:#}", e) },
+                    }),
+                );
+                emit(
+                    &app_run,
+                    serde_json::json!({ "event": "exit", "code": null, "success": false, "cancelled": cancelled }),
+                );
+            }
+            Err(e) => {
+                emit(&app_run, serde_json::json!({ "event": "error", "msg": e }));
+                emit(
+                    &app_run,
+                    serde_json::json!({ "event": "exit", "code": null, "success": false }),
                 );
             }
         }
     });
-
-    let status = child.wait().await;
-    let _ = t_out.await;
-    let _ = t_err.await;
-
-    app.state::<AppState>().set_pid(None);
-    let code = status.ok().and_then(|s| s.code());
-    emit(
-        &app,
-        serde_json::json!({ "event": "exit", "code": code, "success": code == Some(0) }),
-    );
+    Ok(count)
 }
 
 #[tauri::command]
 pub fn cancel_reauth(state: State<'_, AppState>) -> Result<bool, String> {
-    match state.pid() {
-        Some(pid) => {
-            // worker 会连带关闭它启动的浏览器
-            let ok = std::process::Command::new("kill")
-                .arg("-TERM")
-                .arg(pid.to_string())
-                .status()
-                .map(|s| s.success())
-                .unwrap_or(false);
-            state.set_pid(None);
-            Ok(ok)
-        }
-        None => Ok(false),
-    }
+    Ok(state.cancel_job())
 }
 
 // ---------------------------------------------------------------------------

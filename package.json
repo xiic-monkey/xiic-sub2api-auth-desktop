@@ -10,8 +10,7 @@
     "preview": "vite preview",
     "tauri": "tauri",
     "app:dev": "tauri dev",
-    "app:build": "npm run sync:worker && tauri build",
-    "sync:worker": "node scripts/sync-worker.mjs",
+    "app:build": "tauri build",
     "icon": "node scripts/gen_icon.mjs && tauri icon src-tauri/app-icon.png"
   },
   "dependencies": {

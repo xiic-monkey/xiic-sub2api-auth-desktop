@@ -65,10 +65,10 @@ export default function CredentialPanel({
         </header>
         <div className="content">
           <div className="field">
-            <label>浏览器引擎</label>
+            <label>浏览器引擎（原生 CDP，零 Node）</label>
             <select value={engine} onChange={(e) => onEngineChange(e.target.value)}>
-              <option value="chrome">本机 Google Chrome（不下载，推荐）</option>
-              <option value="chromium">内置 Chromium（需已安装）</option>
+              <option value="chrome">本机 Google Chrome（推荐）</option>
+              <option value="chromium">系统 Chromium（需已安装）</option>
             </select>
           </div>
           <div className="actions">
@@ -84,22 +84,10 @@ export default function CredentialPanel({
           {engines?.chromeError && (
             <div className="hint">Chrome：{engines.chromeError}</div>
           )}
-          <div className="field">
-            <label>worker 状态</label>
-            <div className="hint">
-              {info ? (
-                <>
-                  <b>{info.worker_ready ? "已就绪" : "缺失"}</b>
-                  <br />
-                  {info.worker_script}
-                </>
-              ) : (
-                "读取中…"
-              )}
-            </div>
-          </div>
           {info && (
             <div className="hint">
+              浏览器：{info.browser_ready ? info.browser_path : "未找到（先点「检测」确认）"}
+              <br />
               数据目录：{info.data_dir}
             </div>
           )}

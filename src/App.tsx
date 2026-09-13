@@ -277,12 +277,12 @@ export default function App() {
         <div className="meta">
           <span>引擎：{engineLabel}</span>
           <span>
-            worker：
+            浏览器：
             {info ? (
-              info.worker_ready ? (
+              info.browser_ready ? (
                 <span className="badge ok">就绪</span>
               ) : (
-                <span className="badge err">缺失</span>
+                <span className="badge err">未找到</span>
               )
             ) : (
               "—"

@@ -37,15 +37,16 @@ export interface EngineStatus {
   chromium: boolean;
   chromeError: string | null;
   chromiumError: string | null;
-  chromeVersion: string | null;
+  chromePath?: string | null;
+  chromiumPath?: string | null;
 }
 
 export interface AppInfo {
   version: string;
   data_dir: string;
-  worker_root: string;
-  worker_script: string;
-  worker_ready: boolean;
+  /** 当前引擎探测到的浏览器可执行文件（未找到为空串） */
+  browser_path: string;
+  browser_ready: boolean;
 }
 
 export interface FieldPreview {
@@ -75,7 +76,7 @@ export interface ApplyReport {
   outcomes: ApplyOutcome[];
 }
 
-/** worker 通过 stdout 吐出的 NDJSON 事件（原样转发）。 */
+/** 重授权流程的进度事件（Rust 侧经回调转发）。 */
 export type ReauthEvent =
   | { event: "step"; step: string; msg: string }
   | {
