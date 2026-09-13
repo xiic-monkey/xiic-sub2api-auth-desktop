@@ -1,0 +1,26 @@
+[package]
+name = "xiic-sub2api-auth-desktop"
+version = "0.1.0"
+description = "sub2api 重授权台 · 本地单机版"
+authors = ["xiic"]
+edition = "2021"
+default-run = "xiic-sub2api-auth-desktop"
+
+[lib]
+# 与 bin 区分，避免 Windows 上同名冲突
+name = "xiic_sub2api_auth_desktop_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-opener = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+anyhow = "1"
+tokio = { version = "1", features = ["process", "io-util", "macros", "rt-multi-thread", "sync", "time"] }
+
+# 复用服务器端 CLI 的全部核心逻辑（同一份代码，两个入口）
+sub2api-operator = { path = "../../xiic-sub2api-authorize" }

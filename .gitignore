@@ -1,0 +1,20 @@
+# 依赖与构建产物
+node_modules/
+dist/
+src-tauri/target/
+
+# 同步进来的浏览器 worker 资源（由 npm run sync:worker 生成）
+src-tauri/resources/
+
+# 本地数据（绝不入库）
+*.db
+settings.json
+config.toml
+.env
+
+# 本地工作区记忆（不入库）
+.workbuddy/
+
+# 系统
+.DS_Store
+*.log

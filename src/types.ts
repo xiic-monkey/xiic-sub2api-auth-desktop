@@ -1,0 +1,109 @@
+// 与 Rust 侧 commands.rs 的结构一一对应（字段名保持 snake_case）。
+
+export interface Settings {
+  base_url: string;
+  email: string;
+  password: string;
+  totp_secret: string;
+  verify_tls: boolean;
+  gate_url: string;
+  cpa_url: string;
+  browser_engine: string;
+  max_seconds: number;
+}
+
+export interface CredentialView {
+  exists: boolean;
+  account: string;
+  password: string;
+  cdk: string;
+  updated_at: string;
+}
+
+export interface AccountView {
+  id: number;
+  name: string;
+  platform: string;
+  account_type: string;
+  status: string;
+  error_message: string;
+  expires_in_days: number | null;
+  schedulable: boolean;
+  has_401: boolean;
+  needs_reauth: boolean;
+  has_refresh_token: boolean;
+}
+
+export interface EngineStatus {
+  chrome: boolean;
+  chromium: boolean;
+  chromeError: string | null;
+  chromiumError: string | null;
+  chromeVersion: string | null;
+}
+
+export interface AppInfo {
+  version: string;
+  data_dir: string;
+  worker_root: string;
+  worker_script: string;
+  worker_ready: boolean;
+}
+
+export interface FieldPreview {
+  key: string;
+  value: string;
+  hidden: boolean;
+}
+
+export interface PlanItem {
+  account_id: number;
+  account_type: string;
+  email: string;
+  preview: FieldPreview[];
+}
+
+export interface ApplyOutcome {
+  account_id: number;
+  email: string;
+  ok: boolean;
+  message: string;
+}
+
+export interface ApplyReport {
+  dry_run: boolean;
+  plans: PlanItem[];
+  skipped: string[];
+  outcomes: ApplyOutcome[];
+}
+
+/** worker 通过 stdout 吐出的 NDJSON 事件（原样转发）。 */
+export type ReauthEvent =
+  | { event: "step"; step: string; msg: string }
+  | {
+      event: "poll";
+      t: string;
+      stat: string;
+      err: string;
+      emailsLen: number;
+      dlAll: boolean;
+      copyAll: boolean;
+    }
+  | { event: "log"; msg: string }
+  | { event: "done"; result: FetchResult }
+  | { event: "error"; msg: string; errors?: string[] }
+  | { event: "exit"; code: number | null; success?: boolean }
+  | { event: "raw"; line: string };
+
+export interface FetchResult {
+  ok: boolean;
+  url: string;
+  emailsCount: number;
+  done: boolean;
+  finalState: { t?: string; stat?: string; note?: string } | null;
+  copyClicked: boolean;
+  /** 401 页「复制全部」读回的原始 session（含 token） */
+  clipboard: string;
+  cpaPage: { url: string; title: string; output: string } | null;
+  errors: string[];
+}
