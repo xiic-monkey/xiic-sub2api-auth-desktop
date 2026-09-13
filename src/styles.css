@@ -162,6 +162,13 @@ input[type="checkbox"] {
   gap: 12px;
 }
 
+/* 关键：子卡片禁止收缩（flex-shrink 默认 1，窗口矮时卡片先被压扁、
+   内容被 .card 的 overflow:hidden 裁掉，overflow-y:auto 反而永不触发）。
+   保持固有高度，超高时由 .sidebar 统一滚动。 */
+.sidebar > * {
+  flex: 0 0 auto;
+}
+
 .main {
   display: grid;
   grid-template-rows: minmax(180px, 1fr) auto;
