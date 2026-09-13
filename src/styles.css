@@ -145,10 +145,14 @@ input[type="checkbox"] {
   flex: 1 1 auto;
   display: grid;
   grid-template-columns: 356px 1fr;
+  /* 关键：行高约束到容器，侧栏才会在内容超高时出现滚动条，
+     否则隐式行 auto 会被内容撑破，底部直接被窗口裁掉 */
+  grid-template-rows: minmax(0, 1fr);
   min-height: 0;
 }
 
 .sidebar {
+  min-height: 0;
   border-right: 1px solid var(--border);
   background: var(--panel-sub);
   overflow-y: auto;
