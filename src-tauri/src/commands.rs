@@ -85,6 +85,9 @@ impl Settings {
                 }
             },
             verify_tls: self.verify_tls,
+            gate_url: self.gate_url.trim().to_string(),
+            cpa_url: self.cpa_url.trim().to_string(),
+            max_seconds: self.max_seconds,
         })
     }
 }
