@@ -14,8 +14,6 @@ export interface Settings {
 
 export interface CredentialView {
   exists: boolean;
-  account: string;
-  password: string;
   cdk: string;
   updated_at: string;
 }

@@ -11,7 +11,8 @@
     "tauri": "tauri",
     "app:dev": "tauri dev",
     "app:build": "npm run sync:worker && tauri build",
-    "sync:worker": "node scripts/sync-worker.mjs"
+    "sync:worker": "node scripts/sync-worker.mjs",
+    "icon": "node scripts/gen_icon.mjs && tauri icon src-tauri/app-icon.png"
   },
   "dependencies": {
     "@tauri-apps/api": "^2",
@@ -20,6 +21,7 @@
     "react-dom": "^19.1.0"
   },
   "devDependencies": {
+    "@resvg/resvg-js": "^2.6.2",
     "@tauri-apps/cli": "^2",
     "@types/react": "^19.1.8",
     "@types/react-dom": "^19.1.6",

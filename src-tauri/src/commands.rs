@@ -175,8 +175,6 @@ impl From<&Account> for AccountView {
 #[derive(Debug, Clone, Serialize)]
 pub struct CredentialView {
     pub exists: bool,
-    pub account: String,
-    pub password: String,
     pub cdk: String,
     pub updated_at: String,
 }
@@ -255,15 +253,11 @@ pub fn load_credentials() -> Result<CredentialView, String> {
     match store::load() {
         Ok(Some(c)) => Ok(CredentialView {
             exists: true,
-            account: c.account,
-            password: c.password,
             cdk: c.cdk,
             updated_at: c.updated_at,
         }),
         Ok(None) => Ok(CredentialView {
             exists: false,
-            account: String::new(),
-            password: String::new(),
             cdk: String::new(),
             updated_at: String::new(),
         }),
@@ -272,13 +266,8 @@ pub fn load_credentials() -> Result<CredentialView, String> {
 }
 
 #[tauri::command]
-pub fn save_credentials(
-    account: String,
-    password: String,
-    cdk: String,
-) -> Result<CredentialView, String> {
-    // 密码留空 = 保留原密码（避免脱敏展示后误清空）
-    store::save(&account, &password, &cdk, true).map_err(|e| format!("保存凭证失败：{}", e))?;
+pub fn save_credentials(cdk: String) -> Result<CredentialView, String> {
+    store::save(&cdk).map_err(|e| format!("保存凭证失败：{}", e))?;
     load_credentials()
 }
 

@@ -158,7 +158,7 @@ export default function App() {
     if (!creds) return;
     setSavingCreds(true);
     try {
-      const c = await api.saveCredentials(creds.account, creds.password, creds.cdk);
+      const c = await api.saveCredentials(creds.cdk);
       setCreds(c);
       notify("凭证已保存");
     } catch (e) {

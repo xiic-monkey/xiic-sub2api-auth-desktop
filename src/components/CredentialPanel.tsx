@@ -41,22 +41,6 @@ export default function CredentialPanel({
         </header>
         <div className="content">
           <div className="field">
-            <label>接码账号</label>
-            <input value={creds.account} onChange={(e) => set("account", e.target.value)} />
-          </div>
-          <div className="field">
-            <label>
-              <span>接码密码</span>
-              {creds.exists && <span className="tiny">留空 = 不修改已存密码</span>}
-            </label>
-            <input
-              type="password"
-              value={creds.password}
-              placeholder={creds.exists ? "（已保存，留空保留）" : ""}
-              onChange={(e) => set("password", e.target.value)}
-            />
-          </div>
-          <div className="field">
             <label>CDK（重授权消耗）</label>
             <input
               value={creds.cdk}

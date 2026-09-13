@@ -63,6 +63,7 @@ export default function SettingsPanel({ settings, onChange, onSave, saving }: Pr
             />
           </div>
         </div>
+        <div className="hint">若 sub2api 管理员账号开启 TOTP 二次验证则填 base32 密钥；未开启可留空。</div>
         <label className="row-between tiny muted" style={{ cursor: "pointer" }}>
           <span>校验证书（自签证书请取消勾选）</span>
           <input
@@ -71,12 +72,14 @@ export default function SettingsPanel({ settings, onChange, onSave, saving }: Pr
             onChange={(e) => set("verify_tls", e.target.checked)}
           />
         </label>
+        <div className="hint">连接 sub2api 的 HTTPS 证书校验。使用自签名证书时请取消勾选。</div>
         <div className="field">
           <label>接码门页</label>
           <input
             value={settings.gate_url}
             onChange={(e) => set("gate_url", e.target.value)}
           />
+          <div className="hint">401 门页地址，CDK 入口。流程里会用它进入并获取新 token。</div>
         </div>
         <div className="field">
           <label>CPA 转换页</label>

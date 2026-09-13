@@ -18,8 +18,8 @@ export const api = {
   saveSettings: (settings: Settings) => invoke<Settings>("save_settings", { settings }),
 
   loadCredentials: () => invoke<CredentialView>("load_credentials"),
-  saveCredentials: (account: string, password: string, cdk: string) =>
-    invoke<CredentialView>("save_credentials", { account, password, cdk }),
+  saveCredentials: (cdk: string) =>
+    invoke<CredentialView>("save_credentials", { cdk }),
 
   listAccounts: () => invoke<AccountView[]>("list_accounts"),
 
