@@ -18,3 +18,7 @@ config.toml
 # 系统
 .DS_Store
 *.log
+
+# tauri icon 跨平台生成物（macOS 打包不需要）
+src-tauri/icons/android/
+src-tauri/icons/ios/
