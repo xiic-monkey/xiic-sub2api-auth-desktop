@@ -11,7 +11,7 @@
  *   node scripts/sync-worker.mjs
  *   SUB2API_WORKER_SRC=/path/to/browser-worker node scripts/sync-worker.mjs
  */
-import { cp, mkdir, rm, stat } from "node:fs/promises";
+import { cp, mkdir, stat } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -29,18 +29,20 @@ if (!existsSync(path.join(src, "worker.js"))) {
   process.exit(1);
 }
 
-await rm(dst, { recursive: true, force: true });
+// 只覆盖、不整体删除（避免触发批量删除保护）
 await mkdir(dst, { recursive: true });
 
 for (const item of ["worker.js", "package.json"]) {
   const p = path.join(src, item);
-  if (existsSync(p)) await cp(p, path.join(dst, item));
+  if (existsSync(p)) await cp(p, path.join(dst, item), { recursive: true, force: true });
 }
 
-// playwright-core 及其依赖（playwright-core 自身零依赖，通常只有一个目录）
-const nm = path.join(src, "node_modules");
-if (existsSync(nm)) {
-  await cp(nm, path.join(dst, "node_modules"), { recursive: true });
+// playwright-core 自包含、零依赖，只需复制它本身（不复制整个 node_modules，
+// 否则 node_modules/.bin 下的符号链接会触发 cp 自引用 EINVAL）
+await mkdir(path.join(dst, "node_modules"), { recursive: true });
+const pc = path.join(src, "node_modules", "playwright-core");
+if (existsSync(pc)) {
+  await cp(pc, path.join(dst, "node_modules", "playwright-core"), { recursive: true, force: true });
   let size = 0;
   const walk = async (d) => {
     for (const e of await import("node:fs/promises").then((m) => m.readdir(d, { withFileTypes: true }))) {
@@ -49,11 +51,11 @@ if (existsSync(nm)) {
       else size += (await stat(f)).size;
     }
   };
-  await walk(nm);
-  console.log(`[sync-worker] node_modules 已复制（${(size / 1024 / 1024).toFixed(1)} MB）`);
+  await walk(pc);
+  console.log(`[sync-worker] playwright-core 已复制（${(size / 1024 / 1024).toFixed(1)} MB）`);
 } else {
   console.warn(
-    `[sync-worker] 源目录没有 node_modules，打包后将缺少 playwright-core。\n` +
+    `[sync-worker] 源目录没有 playwright-core，打包后将缺少浏览器引擎。\n` +
       `              请先执行：cd ${src} && npm install`
   );
 }
