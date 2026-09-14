@@ -27,7 +27,8 @@ export const api = {
   listAccounts: () => invoke<AccountView[]>("list_accounts"),
 
   groupAccounts: (pageSize: number) =>
-    invoke<GroupResult>("group_accounts", { page_size: pageSize }),
+    // Tauri 2 会把 Rust 侧的 snake_case 参数名转成 camelCase，所以这里必须传 pageSize
+    invoke<GroupResult>("group_accounts", { pageSize }),
 
   startReauth: (emails: string[]) => invoke<number>("start_reauth", { emails }),
   cancelReauth: () => invoke<boolean>("cancel_reauth"),
