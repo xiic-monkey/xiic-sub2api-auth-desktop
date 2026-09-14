@@ -230,6 +230,12 @@ input[type="checkbox"] {
   flex-wrap: wrap;
 }
 
+.header-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
 /* ---------- 状态徽标 ---------- */
 .badge {
   display: inline-flex;

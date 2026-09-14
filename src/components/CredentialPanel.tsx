@@ -59,9 +59,17 @@ export default function CredentialPanel({
       <section className="card">
         <header>
           <span>接码平台凭证</span>
-          <button className="ghost" onClick={onSave} disabled={saving}>
-            {saving ? "保存中…" : "保存"}
-          </button>
+          <div className="header-actions">
+            <button className="ghost" onClick={onCheckLeft} disabled={checkingLeft || merging || saving}>
+              {checkingLeft ? "查询中…" : "次数"}
+            </button>
+            <button className="ghost" onClick={() => setShowMerge(true)} disabled={checkingLeft || merging || saving}>
+              {merging ? "合并中…" : "合并"}
+            </button>
+            <button className="ghost" onClick={onSave} disabled={saving}>
+              {saving ? "保存中…" : "保存"}
+            </button>
+          </div>
         </header>
         <div className="content">
           <div className="field">
@@ -71,14 +79,6 @@ export default function CredentialPanel({
               placeholder="TA-XXXX-XXXX-XXXX"
               onChange={(e) => set("cdk", e.target.value)}
             />
-          </div>
-          <div className="actions">
-            <button className="ghost" onClick={onCheckLeft} disabled={checkingLeft || merging || saving}>
-              {checkingLeft ? "查询中…" : "查询次数"}
-            </button>
-            <button className="ghost" onClick={() => setShowMerge(true)} disabled={checkingLeft || merging || saving}>
-              {merging ? "合并中…" : "合并 CDK"}
-            </button>
           </div>
           <div className="hint">
             {creds.exists
