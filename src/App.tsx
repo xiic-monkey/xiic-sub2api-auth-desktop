@@ -39,6 +39,7 @@ export default function App() {
   const [checking, setChecking] = useState(false);
   const [checkingLeft, setCheckingLeft] = useState(false);
   const [merging, setMerging] = useState(false);
+  const [grouping, setGrouping] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
 
   const notify = useCallback((msg: string) => {
@@ -294,6 +295,29 @@ export default function App() {
     [creds, notify]
   );
 
+  /** 分组：按 id 升序后按 pageSize 分页，每页优先级设为页码并写回 sub2api。 */
+  const groupAccounts = useCallback(
+    async (pageSize: number) => {
+      setGrouping(true);
+      try {
+        const r = await api.groupAccounts(pageSize);
+        const ok = r.outcomes.filter((o) => o.ok).length;
+        const bad = r.outcomes.length - ok;
+        notify(
+          bad === 0
+            ? `已分 ${r.pages} 组（每组最多 ${r.page_size} 个），优先级 1-${r.pages} 已写入`
+            : `分组完成但有 ${bad} 组写入失败，成功 ${ok} 组`
+        );
+        await reloadAccounts();
+      } catch (e) {
+        notify(String(e));
+      } finally {
+        setGrouping(false);
+      }
+    },
+    [notify, reloadAccounts]
+  );
+
   const openUrl = useCallback(
     (url: string) => {
       api.openExternal(url).catch((e) => notify(String(e)));
@@ -379,6 +403,8 @@ export default function App() {
             onToggle={toggle}
             onToggleAll={toggleAll}
             onReload={reloadAccounts}
+            onGroup={groupAccounts}
+            grouping={grouping}
             only401={only401}
             onOnly401Change={setOnly401}
             query={query}

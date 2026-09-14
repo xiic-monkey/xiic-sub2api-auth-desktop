@@ -1,4 +1,9 @@
+import { useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import type { AccountView } from "../types";
+
+/** 每页账号数的可选范围（分组粒度）。 */
+const GROUP_SIZES = Array.from({ length: 20 }, (_, i) => i + 1);
 
 interface Props {
   accounts: AccountView[];
@@ -7,6 +12,9 @@ interface Props {
   onToggle: (id: number) => void;
   onToggleAll: (checked: boolean) => void;
   onReload: () => void;
+  /** 按每页大小分组：按 id 升序分页，每页优先级设为页码 */
+  onGroup: (pageSize: number) => void;
+  grouping: boolean;
   only401: boolean;
   onOnly401Change: (v: boolean) => void;
   query: string;
@@ -20,11 +28,34 @@ export default function AccountTable({
   onToggle,
   onToggleAll,
   onReload,
+  onGroup,
+  grouping,
   only401,
   onOnly401Change,
   query,
   onQueryChange,
 }: Props) {
+  const [showGroup, setShowGroup] = useState(false);
+  const [pageSize, setPageSize] = useState(10);
+  const groupBtnRef = useRef<HTMLButtonElement>(null);
+  const [popPos, setPopPos] = useState<{ top: number; right: number } | null>(null);
+
+  // 卡片是 overflow:hidden，弹层相对按钮定位会被裁掉，所以挂到 body 上用 fixed 定位。
+  const openGroup = () => {
+    const r = groupBtnRef.current?.getBoundingClientRect();
+    setPopPos(
+      r
+        ? { top: r.bottom + 6, right: Math.max(8, window.innerWidth - r.right) }
+        : { top: 80, right: 16 }
+    );
+    setShowGroup(true);
+  };
+
+  const confirmGroup = () => {
+    onGroup(pageSize);
+    setShowGroup(false);
+  };
+
   const allChecked = accounts.length > 0 && accounts.every((a) => selected.has(a.id));
 
   const statusBadge = (a: AccountView) => {
@@ -67,6 +98,44 @@ export default function AccountTable({
           <button className="ghost" onClick={onReload} disabled={loading}>
             {loading ? "加载中…" : "刷新"}
           </button>
+          <button
+            ref={groupBtnRef}
+            className="ghost"
+            onClick={() => (showGroup ? setShowGroup(false) : openGroup())}
+            disabled={loading || grouping}
+          >
+            {grouping ? "分组中…" : "分组"}
+          </button>
+          {showGroup &&
+            popPos &&
+            createPortal(
+              <>
+                <div className="popover-backdrop" onClick={() => setShowGroup(false)} />
+                <div
+                  className="popover"
+                  style={{ position: "fixed", top: popPos.top, right: popPos.right }}
+                >
+                  <div className="popover-title">每页账号数（分组粒度）</div>
+                  <select
+                    value={pageSize}
+                    onChange={(e) => setPageSize(Number(e.target.value))}
+                  >
+                    {GROUP_SIZES.map((n) => (
+                      <option key={n} value={n}>
+                        {n}
+                      </option>
+                    ))}
+                  </select>
+                  <div className="hint">
+                    按账号 id 从小到大排序后分页，第 N 页的账号优先级统一设为 N。
+                  </div>
+                  <button className="primary" onClick={confirmGroup} disabled={grouping}>
+                    确认
+                  </button>
+                </div>
+              </>,
+              document.body
+            )}
         </div>
       </header>
 
@@ -89,6 +158,7 @@ export default function AccountTable({
                   />
                 </th>
                 <th style={{ width: 54 }}>#</th>
+                <th style={{ width: 66 }}>优先级</th>
                 <th>账号</th>
                 <th style={{ width: 120 }}>平台 / 类型</th>
                 <th style={{ width: 78 }}>状态</th>
@@ -116,6 +186,7 @@ export default function AccountTable({
                     />
                   </td>
                   <td className="mono">{a.id}</td>
+                  <td className="mono">{a.priority === null ? <span className="muted">—</span> : a.priority}</td>
                   <td className="mono">{a.name || "—"}</td>
                   <td className="muted">
                     {a.platform}

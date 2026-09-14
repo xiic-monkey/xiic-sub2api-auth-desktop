@@ -41,6 +41,8 @@ export interface AccountView {
   error_message: string;
   expires_in_days: number | null;
   schedulable: boolean;
+  /** 调度优先级（sub2api 原生，越小越优先）；分组后等于页码 */
+  priority: number | null;
   has_401: boolean;
   needs_reauth: boolean;
   has_refresh_token: boolean;
@@ -88,6 +90,23 @@ export interface DeleteOutcome {
   email: string;
   ok: boolean;
   message: string;
+}
+
+/** 分组：一页账号的设置结果 */
+export interface GroupOutcome {
+  page: number;
+  priority: number;
+  account_ids: number[];
+  ok: boolean;
+  message: string;
+}
+
+/** 分组整体结果 */
+export interface GroupResult {
+  page_size: number;
+  total: number;
+  pages: number;
+  outcomes: GroupOutcome[];
 }
 
 export interface ApplyReport {

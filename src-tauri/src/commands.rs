@@ -14,6 +14,7 @@ use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager, State};
 
 use sub2api_operator::browser;
+use sub2api_operator::commands::group::{group_accounts as operator_group_accounts, GroupResult};
 use sub2api_operator::commands::reauth::{apply_value, delete_banned_accounts, ApplyReport, DeleteOutcome};
 use sub2api_operator::config::Config;
 use sub2api_operator::models::Account;
@@ -144,6 +145,8 @@ pub struct AccountView {
     pub error_message: String,
     pub expires_in_days: Option<i64>,
     pub schedulable: bool,
+    /// 调度优先级（sub2api 原生，越小越优先）。分组功能会把它设成页码。
+    pub priority: Option<i64>,
     pub has_401: bool,
     pub needs_reauth: bool,
     /// 是否还持有 refresh_token（重授权前的体检信号）
@@ -168,6 +171,7 @@ impl From<&Account> for AccountView {
             error_message: a.error_message.clone(),
             expires_in_days: a.expires_in_days(),
             schedulable: a.schedulable,
+            priority: a.priority,
             has_401: a.has_401(),
             needs_reauth: a.needs_reauth(),
             has_refresh_token,
@@ -269,6 +273,22 @@ pub async fn list_accounts(state: State<'_, AppState>) -> Result<Vec<AccountView
         let mut client = Sub2ApiClient::login(&cfg).map_err(|e| format!("{:#}", e))?;
         let accounts = client.list_accounts().map_err(|e| format!("{:#}", e))?;
         Ok(accounts.iter().map(AccountView::from).collect())
+    })
+    .await
+    .map_err(|e| format!("任务调度失败：{}", e))?
+}
+
+/// 账号分组：按 id 升序 → 按 `page_size` 分页 → 每页优先级设为页码（1,2,3…）。
+/// `page_size` 允许 1-20（与界面下拉框一致）。
+#[tauri::command]
+pub async fn group_accounts(
+    state: State<'_, AppState>,
+    page_size: usize,
+) -> Result<GroupResult, String> {
+    let cfg = state.settings_snapshot().to_config().map_err(|e| e.to_string())?;
+    tauri::async_runtime::spawn_blocking(move || -> Result<GroupResult, String> {
+        let mut client = Sub2ApiClient::login(&cfg).map_err(|e| format!("{:#}", e))?;
+        operator_group_accounts(&mut client, page_size).map_err(|e| format!("{:#}", e))
     })
     .await
     .map_err(|e| format!("任务调度失败：{}", e))?

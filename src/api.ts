@@ -8,6 +8,7 @@ import type {
   CdkMergeResult,
   CredentialView,
   EngineStatus,
+  GroupResult,
   ReauthEvent,
   Settings,
 } from "./types";
@@ -24,6 +25,9 @@ export const api = {
     invoke<CredentialView>("save_credentials", { cdk }),
 
   listAccounts: () => invoke<AccountView[]>("list_accounts"),
+
+  groupAccounts: (pageSize: number) =>
+    invoke<GroupResult>("group_accounts", { page_size: pageSize }),
 
   startReauth: (emails: string[]) => invoke<number>("start_reauth", { emails }),
   cancelReauth: () => invoke<boolean>("cancel_reauth"),

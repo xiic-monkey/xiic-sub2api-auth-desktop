@@ -22,6 +22,7 @@ pub fn run() {
             commands::load_credentials,
             commands::save_credentials,
             commands::list_accounts,
+            commands::group_accounts,
             commands::start_reauth,
             commands::cancel_reauth,
             commands::apply_result,
