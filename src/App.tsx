@@ -147,12 +147,16 @@ export default function App() {
   // ---------- 派生数据 ----------
   const visibleAccounts = useMemo(() => {
     const q = query.trim().toLowerCase();
-    return accounts.filter((a) => {
-      if (only401 && !a.has_401) return false;
-      if (q && !(a.name.toLowerCase().includes(q) || a.platform.toLowerCase().includes(q)))
-        return false;
-      return true;
-    });
+    // 默认按账号 id 从小到大排序（与分组时的排序保持一致）
+    return accounts
+      .filter((a) => {
+        if (only401 && !a.has_401) return false;
+        if (q && !(a.name.toLowerCase().includes(q) || a.platform.toLowerCase().includes(q)))
+          return false;
+        return true;
+      })
+      .slice()
+      .sort((a, b) => a.id - b.id);
   }, [accounts, only401, query]);
 
   const selectedEmails = useMemo(
