@@ -4,6 +4,8 @@ import type {
   AccountView,
   AppInfo,
   ApplyReport,
+  CdkCheckResult,
+  CdkMergeResult,
   CredentialView,
   EngineStatus,
   ReauthEvent,
@@ -27,6 +29,9 @@ export const api = {
   cancelReauth: () => invoke<boolean>("cancel_reauth"),
 
   applyResult: (raw: string, yes: boolean) => invoke<ApplyReport>("apply_result", { raw, yes }),
+
+  checkCdkLeft: (cdk: string) => invoke<CdkCheckResult>("check_cdk_left", { cdk }),
+  mergeCdk: (codes: string[]) => invoke<CdkMergeResult>("merge_cdk", { codes }),
 
   openExternal: (url: string) => invoke<void>("open_external", { url }),
 };

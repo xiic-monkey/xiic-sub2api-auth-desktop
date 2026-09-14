@@ -4,6 +4,8 @@ import type {
   AccountView,
   AppInfo,
   ApplyReport,
+  CdkCheckResult,
+  CdkMergeResult,
   CredentialView,
   EngineStatus,
   FetchResult,
@@ -35,6 +37,8 @@ export default function App() {
   const [savingSettings, setSavingSettings] = useState(false);
   const [savingCreds, setSavingCreds] = useState(false);
   const [checking, setChecking] = useState(false);
+  const [checkingLeft, setCheckingLeft] = useState(false);
+  const [merging, setMerging] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
 
   const notify = useCallback((msg: string) => {
@@ -97,10 +101,30 @@ export default function App() {
         const ok = e.report.outcomes.filter((o) => o.ok).length;
         notify(`写回完成：成功 ${ok} / 失败 ${e.report.outcomes.length - ok}`);
         void reloadAccounts();
+      } else if (e.event === "cdk-check") {
+        const r = e.result as CdkCheckResult;
+        if (r.ok) {
+          notify(`${r.cdk}：${r.left_text}`);
+        } else {
+          notify(`查询失败：${r.left_text || "未知错误"}`);
+        }
+        setCheckingLeft(false);
+      } else if (e.event === "cdk-merge") {
+        const r = e.result as CdkMergeResult;
+        if (r.ok) {
+          notify(`合并成功：${r.new_cdk} ${r.new_left}`);
+          // 后端已保存新 CDK，刷新前端状态
+          void api.loadCredentials().then(setCreds);
+        } else {
+          notify("合并失败");
+        }
+        setMerging(false);
       } else if (e.event === "error") {
         notify(e.msg);
       } else if (e.event === "exit") {
         setRunning(false);
+        setCheckingLeft(false);
+        setMerging(false);
       }
     }).then((f) => {
       if (dead) f();
@@ -234,6 +258,35 @@ export default function App() {
     setEvents([]);
   }, []);
 
+  const checkLeft = useCallback(async () => {
+    if (!creds?.cdk) return;
+    setEvents([]);
+    setCheckingLeft(true);
+    try {
+      await api.checkCdkLeft(creds.cdk);
+    } catch (e) {
+      setCheckingLeft(false);
+      notify(String(e));
+    }
+  }, [creds, notify]);
+
+  const mergeCdk = useCallback(
+    async (codes: string[]) => {
+      if (!creds?.cdk) return;
+      setEvents([]);
+      setMerging(true);
+      try {
+        // 把当前保存的 CDK 也加进去（去重交给后端/页面）
+        const all = [creds.cdk, ...codes];
+        await api.mergeCdk(all);
+      } catch (e) {
+        setMerging(false);
+        notify(String(e));
+      }
+    },
+    [creds, notify]
+  );
+
   const openUrl = useCallback(
     (url: string) => {
       api.openExternal(url).catch((e) => notify(String(e)));
@@ -297,6 +350,10 @@ export default function App() {
               onChange={setCreds}
               onSave={saveCreds}
               saving={savingCreds}
+              onCheckLeft={checkLeft}
+              checkingLeft={checkingLeft}
+              onMerge={mergeCdk}
+              merging={merging}
               engine={settings.browser_engine}
               onEngineChange={changeEngine}
               engines={engines}
@@ -323,7 +380,7 @@ export default function App() {
 
           <ReauthRunner
             emails={selectedEmails}
-            running={running}
+            running={running || checkingLeft || merging}
             events={events}
             result={result}
             report={report}

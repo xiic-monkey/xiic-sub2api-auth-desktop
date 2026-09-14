@@ -1,3 +1,4 @@
+import { useState } from "react";
 import type { AppInfo, CredentialView, EngineStatus } from "../types";
 
 interface Props {
@@ -5,6 +6,11 @@ interface Props {
   onChange: (c: CredentialView) => void;
   onSave: () => void;
   saving: boolean;
+
+  onCheckLeft: () => void;
+  checkingLeft: boolean;
+  onMerge: (codes: string[]) => void;
+  merging: boolean;
 
   engine: string;
   onEngineChange: (v: string) => void;
@@ -20,6 +26,10 @@ export default function CredentialPanel({
   onChange,
   onSave,
   saving,
+  onCheckLeft,
+  checkingLeft,
+  onMerge,
+  merging,
   engine,
   onEngineChange,
   engines,
@@ -29,6 +39,20 @@ export default function CredentialPanel({
 }: Props) {
   const set = <K extends keyof CredentialView>(k: K, v: CredentialView[K]) =>
     onChange({ ...creds, [k]: v });
+
+  const [showMerge, setShowMerge] = useState(false);
+  const [mergeInput, setMergeInput] = useState("");
+
+  const startMerge = () => {
+    const codes = mergeInput
+      .split(/\n/)
+      .map((s) => s.trim())
+      .filter((s) => s.length > 0);
+    if (codes.length === 0) return;
+    onMerge(codes);
+    setShowMerge(false);
+    setMergeInput("");
+  };
 
   return (
     <>
@@ -48,6 +72,14 @@ export default function CredentialPanel({
               onChange={(e) => set("cdk", e.target.value)}
             />
           </div>
+          <div className="actions">
+            <button className="ghost" onClick={onCheckLeft} disabled={checkingLeft || merging || saving}>
+              {checkingLeft ? "查询中…" : "查询次数"}
+            </button>
+            <button className="ghost" onClick={() => setShowMerge(true)} disabled={checkingLeft || merging || saving}>
+              {merging ? "合并中…" : "合并 CDK"}
+            </button>
+          </div>
           <div className="hint">
             {creds.exists
               ? `已保存 · 更新于 ${creds.updated_at || "—"}`
@@ -55,6 +87,36 @@ export default function CredentialPanel({
           </div>
         </div>
       </section>
+
+      {showMerge && (
+        <div className="modal-overlay" onClick={(e) => e.target === e.currentTarget && setShowMerge(false)}>
+          <div className="modal">
+            <div className="modal-head">
+              <h3>合并 CDK</h3>
+              <button className="ghost" onClick={() => setShowMerge(false)} disabled={merging}>
+                取消
+              </button>
+            </div>
+            <div className="modal-body">
+              <p className="hint">
+                一行一张 CDK。系统会把下面输入的 CDK 与当前已保存的 CDK 一起拿到门页合并，新 CDK 会自动覆盖保存。
+              </p>
+              <textarea
+                value={mergeInput}
+                onChange={(e) => setMergeInput(e.target.value)}
+                placeholder="TA-XXXX-XXXX-XXXX\nTA-YYYY-YYYY-YYYY"
+                rows={6}
+                disabled={merging}
+              />
+            </div>
+            <div className="modal-foot">
+              <button className="primary" onClick={startMerge} disabled={merging || !mergeInput.trim()}>
+                {merging ? "合并中…" : "合并为新 CDK"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <section className="card">
         <header>

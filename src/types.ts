@@ -18,6 +18,20 @@ export interface CredentialView {
   updated_at: string;
 }
 
+export interface CdkCheckResult {
+  ok: boolean;
+  cdk: string;
+  remaining: number | null;
+  quota: number | null;
+  left_text: string;
+}
+
+export interface CdkMergeResult {
+  ok: boolean;
+  new_cdk: string;
+  new_left: string;
+}
+
 export interface AccountView {
   id: number;
   name: string;
@@ -94,6 +108,10 @@ export type ReauthEvent =
   | { event: "preview"; report: ApplyReport }
   /** 自动衔接：真正写回后的结果 */
   | { event: "apply"; report: ApplyReport }
+  /** CDK 查询次数完成 */
+  | { event: "cdk-check"; result: CdkCheckResult }
+  /** CDK 合并完成 */
+  | { event: "cdk-merge"; result: CdkMergeResult }
   | { event: "error"; msg: string; errors?: string[] }
   | { event: "exit"; code: number | null; success?: boolean }
   | { event: "raw"; line: string };

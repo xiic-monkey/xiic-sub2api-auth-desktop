@@ -25,6 +25,8 @@ pub fn run() {
             commands::start_reauth,
             commands::cancel_reauth,
             commands::apply_result,
+            commands::check_cdk_left,
+            commands::merge_cdk,
             commands::open_external,
             commands::ping,
         ])

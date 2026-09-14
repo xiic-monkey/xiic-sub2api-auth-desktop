@@ -524,6 +524,203 @@ pub async fn apply_result(
     .map_err(|e| format!("任务调度失败：{}", e))?
 }
 
+// ---------------------------------------------------------------------------
+// CDK 工具：查询次数 / 合并（共用同一个 browser job slot，与重授权互斥）
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CdkCheckResult {
+    pub ok: bool,
+    pub cdk: String,
+    pub remaining: Option<u64>,
+    pub quota: Option<u64>,
+    pub left_text: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CdkMergeResult {
+    pub ok: bool,
+    pub new_cdk: String,
+    pub new_left: String,
+}
+
+/// 查询当前保存 CDK 的剩余次数。
+#[tauri::command]
+pub async fn check_cdk_left(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    cdk: String,
+) -> Result<CdkCheckResult, String> {
+    if cdk.trim().is_empty() {
+        return Err("没有 CDK 可查询，请先填写并保存".to_string());
+    }
+    if state.job().is_some() {
+        return Err("已有浏览器任务在跑，请先等它结束或点「终止」".to_string());
+    }
+    let settings = state.settings_snapshot();
+    browser::detect_executable(Some(&settings.browser_engine))
+        .map_err(|e| format!("{:#}", e))?;
+
+    let cancel = Arc::new(AtomicBool::new(false));
+    state.set_job(cancel.clone());
+    let cdk_for_task = cdk.clone();
+    let cdk_for_fallback = cdk.clone();
+
+    tauri::async_runtime::spawn(async move {
+        let app_log = app.clone();
+        let app_step = app.clone();
+        let app_run = app.clone();
+        let job = browser::FetchHooks {
+            log: Arc::new(move |l: String| {
+                emit(&app_log, serde_json::json!({ "event": "log", "msg": l }));
+            }),
+            step: Arc::new(move |step: &'static str, msg: String| {
+                emit(&app_step, serde_json::json!({ "event": "step", "step": step, "msg": msg }));
+            }),
+        };
+        let res = tauri::async_runtime::spawn_blocking(move || {
+            browser::check_cdk_left(
+                &settings.gate_url,
+                &cdk_for_task,
+                Some(&settings.browser_engine),
+                &job,
+                Some(&cancel),
+            )
+            .map_err(|e| format!("{:#}", e))
+        })
+        .await;
+
+        match res {
+            Ok(Ok(val)) => {
+                let cdk_res: CdkCheckResult = serde_json::from_value(val.clone())
+                    .unwrap_or(CdkCheckResult {
+                        ok: false,
+                        cdk: cdk_for_fallback.clone(),
+                        remaining: None,
+                        quota: None,
+                        left_text: String::new(),
+                    });
+                emit(&app_run, serde_json::json!({ "event": "cdk-check", "result": cdk_res }));
+                emit(
+                    &app_run,
+                    serde_json::json!({ "event": "exit", "code": 0, "success": cdk_res.ok }),
+                );
+            }
+            Ok(Err(e)) => {
+                let cancelled = e.contains("已取消");
+                emit(&app_run, serde_json::json!({
+                    "event": "error",
+                    "msg": if cancelled { "已取消".to_string() } else { e },
+                }));
+                emit(&app_run, serde_json::json!({ "event": "exit", "code": null, "success": false, "cancelled": cancelled }));
+            }
+            Err(e) => {
+                emit(&app_run, serde_json::json!({ "event": "error", "msg": e.to_string() }));
+                emit(&app_run, serde_json::json!({ "event": "exit", "code": null, "success": false }));
+            }
+        }
+        app_run.state::<AppState>().clear_job();
+    });
+
+    // 同步返回骨架；真实结果通过事件推送
+    Ok(CdkCheckResult {
+        ok: true,
+        cdk: cdk.clone(),
+        remaining: None,
+        quota: None,
+        left_text: "查询中…".to_string(),
+    })
+}
+
+/// 合并多张 CDK 为一张新 CDK，并保存到本地凭证库。
+#[tauri::command]
+pub async fn merge_cdk(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    codes: Vec<String>,
+) -> Result<CdkMergeResult, String> {
+    let codes: Vec<String> = codes.into_iter().map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect();
+    if codes.len() < 2 {
+        return Err("至少需要两张 CDK 才能合并".to_string());
+    }
+    if state.job().is_some() {
+        return Err("已有浏览器任务在跑，请先等它结束或点「终止」".to_string());
+    }
+    let settings = state.settings_snapshot();
+    browser::detect_executable(Some(&settings.browser_engine))
+        .map_err(|e| format!("{:#}", e))?;
+
+    let cancel = Arc::new(AtomicBool::new(false));
+    state.set_job(cancel.clone());
+
+    tauri::async_runtime::spawn(async move {
+        let app_log = app.clone();
+        let app_step = app.clone();
+        let app_run = app.clone();
+        let job = browser::FetchHooks {
+            log: Arc::new(move |l: String| {
+                emit(&app_log, serde_json::json!({ "event": "log", "msg": l }));
+            }),
+            step: Arc::new(move |step: &'static str, msg: String| {
+                emit(&app_step, serde_json::json!({ "event": "step", "step": step, "msg": msg }));
+            }),
+        };
+        let res = tauri::async_runtime::spawn_blocking(move || {
+            browser::merge_cdk(
+                &settings.gate_url,
+                &codes,
+                Some(&settings.browser_engine),
+                &job,
+                Some(&cancel),
+            )
+            .map_err(|e| format!("{:#}", e))
+        })
+        .await;
+
+        match res {
+            Ok(Ok(val)) => {
+                let merge_res: CdkMergeResult = serde_json::from_value(val.clone())
+                    .unwrap_or(CdkMergeResult {
+                        ok: false,
+                        new_cdk: String::new(),
+                        new_left: String::new(),
+                    });
+                if merge_res.ok && !merge_res.new_cdk.is_empty() {
+                    let _ = store::save(&merge_res.new_cdk);
+                    emit(&app_run, serde_json::json!({
+                        "event": "log",
+                        "msg": format!("新 CDK 已保存到本地凭证库：{} {}", merge_res.new_cdk, merge_res.new_left),
+                    }));
+                }
+                emit(&app_run, serde_json::json!({ "event": "cdk-merge", "result": merge_res }));
+                emit(
+                    &app_run,
+                    serde_json::json!({ "event": "exit", "code": 0, "success": merge_res.ok }),
+                );
+            }
+            Ok(Err(e)) => {
+                let cancelled = e.contains("已取消");
+                emit(&app_run, serde_json::json!({
+                    "event": "error",
+                    "msg": if cancelled { "已取消".to_string() } else { e },
+                }));
+                emit(&app_run, serde_json::json!({ "event": "exit", "code": null, "success": false, "cancelled": cancelled }));
+            }
+            Err(e) => {
+                emit(&app_run, serde_json::json!({ "event": "error", "msg": e.to_string() }));
+                emit(&app_run, serde_json::json!({ "event": "exit", "code": null, "success": false }));
+            }
+        }
+        app_run.state::<AppState>().clear_job();
+    });
+
+    Ok(CdkMergeResult {
+        ok: true,
+        new_cdk: "合并中…".to_string(),
+        new_left: String::new(),
+    })
+}
+
 /// 打开外部链接（走系统默认浏览器）。给「打开 401 门页 / CPA 页」用。
 #[tauri::command]
 pub fn open_external(url: String) -> Result<(), String> {
