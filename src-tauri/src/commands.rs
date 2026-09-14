@@ -384,9 +384,11 @@ pub async fn start_reauth(
                         let deleted = match tauri::async_runtime::spawn_blocking(move || -> Result<Vec<DeleteOutcome>, String> {
                             let mut client = Sub2ApiClient::login(&cfg).map_err(|e| format!("{:#}", e))?;
                             let accounts = client.list_accounts().map_err(|e| format!("{:#}", e))?;
-                            let logger = std::sync::Arc::new(move |msg: String| {
-                                let _ = app_ban_log.emit(EVENT, serde_json::json!({ "event": "log", "msg": msg }));
-                            });
+                            let logger: std::sync::Arc<dyn Fn(String) + Send + Sync> =
+                                std::sync::Arc::new(move |msg: String| {
+                                    let _ = app_ban_log
+                                        .emit(EVENT, serde_json::json!({ "event": "log", "msg": msg }));
+                                });
                             Ok(delete_banned_accounts(&mut client, &accounts, &banned_for_task, &logger))
                         }).await {
                             Ok(Ok(d)) => d,
