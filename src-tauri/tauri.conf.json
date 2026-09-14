@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "xiic-sub2api-auth-desktop",
+  "productName": "Xiic Sub2api Auth",
   "version": "0.1.0",
   "identifier": "com.xiic.sub2api-auth-desktop",
   "build": {
