@@ -119,6 +119,13 @@ export default function App() {
           notify("合并失败");
         }
         setMerging(false);
+      } else if (e.event === "banned") {
+        notify(`检测到被封禁/停用账号：${e.emails.join(", ")}`);
+      } else if (e.event === "deleted") {
+        const ok = e.deleted.filter((o) => o.ok).length;
+        const bad = e.deleted.length - ok;
+        notify(`已删除 ${ok} 个被封禁账号${bad > 0 ? `，${bad} 个失败` : ""}`);
+        void reloadAccounts();
       } else if (e.event === "error") {
         notify(e.msg);
       } else if (e.event === "exit") {

@@ -83,6 +83,13 @@ export interface ApplyOutcome {
   message: string;
 }
 
+export interface DeleteOutcome {
+  account_id: number;
+  email: string;
+  ok: boolean;
+  message: string;
+}
+
 export interface ApplyReport {
   dry_run: boolean;
   plans: PlanItem[];
@@ -112,6 +119,10 @@ export type ReauthEvent =
   | { event: "cdk-check"; result: CdkCheckResult }
   /** CDK 合并完成 */
   | { event: "cdk-merge"; result: CdkMergeResult }
+  /** fetch 检测到账号被封禁/停用 */
+  | { event: "banned"; emails: string[] }
+  /** 已尝试从 sub2api 删除被封禁账号 */
+  | { event: "deleted"; deleted: DeleteOutcome[] }
   | { event: "error"; msg: string; errors?: string[] }
   | { event: "exit"; code: number | null; success?: boolean }
   | { event: "raw"; line: string };
@@ -126,5 +137,7 @@ export interface FetchResult {
   /** 401 页「复制全部」读回的原始 session（含 token） */
   clipboard: string;
   cpaPage: { url: string; title: string; output: string } | null;
+  /** fetch 结果页检测到的被封禁/停用邮箱 */
+  bannedEmails: string[];
   errors: string[];
 }

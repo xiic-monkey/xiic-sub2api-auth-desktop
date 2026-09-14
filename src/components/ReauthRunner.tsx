@@ -43,6 +43,14 @@ function lineOf(e: ReauthEvent): { text: string; cls: string } | null {
       return { text: `✗ ${e.msg}`, cls: "err" };
     case "done":
       return { text: "✓ 结果已就绪（含 refresh_token）", cls: "ok" };
+    case "banned":
+      return { text: `⚠ 检测到被封禁/停用账号：${e.emails.join(", ")}`, cls: "warn" };
+    case "deleted": {
+      const ok = e.deleted.filter((o) => o.ok).length;
+      const bad = e.deleted.length - ok;
+      const list = e.deleted.map((o) => `#${o.account_id} ${o.email}${o.ok ? "" : "(" + o.message + ")"}`).join(", ");
+      return { text: `已删除 ${ok}/${e.deleted.length} 个被封禁账号${list ? "：" + list : ""}${bad > 0 ? `（${bad} 个失败）` : ""}`, cls: bad > 0 ? "warn" : "ok" };
+    }
     case "exit":
       return {
         text: e.success ? "✓ 进程正常退出" : `✗ 进程退出（code=${e.code ?? "null"}）`,
@@ -184,6 +192,12 @@ export default function ReauthRunner({
               <>
                 {" "}
                 · CPA 输出：{hasCpaOutput ? `${result.cpaPage.output.length} 字符` : "空"}
+              </>
+            )}
+            {result.bannedEmails && result.bannedEmails.length > 0 && (
+              <>
+                {" "}
+                · 检测到被封禁/停用：{result.bannedEmails.join(", ")}
               </>
             )}
           </div>

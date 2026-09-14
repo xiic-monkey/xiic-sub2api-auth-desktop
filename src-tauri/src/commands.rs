@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager, State};
 
 use sub2api_operator::browser;
-use sub2api_operator::commands::reauth::{apply_value, ApplyReport};
+use sub2api_operator::commands::reauth::{apply_value, delete_banned_accounts, ApplyReport, DeleteOutcome};
 use sub2api_operator::config::Config;
 use sub2api_operator::models::Account;
 use sub2api_operator::{client::Sub2ApiClient, store};
@@ -346,9 +346,66 @@ pub async fn start_reauth(
                     serde_json::json!({ "event": "done", "result": val }),
                 );
 
-                // —— 自动衔接：CPA 输出 → dry-run 预览 → 真正写回（含恢复调度开关）——
+                // —— 自动衔接：删除被封禁账号 → CPA 输出 → dry-run 预览 → 真正写回 ——
                 // 不再让用户手动点「打开 CPA 页 / 预览写回 / 确认写回」。预览信息照常
                 // emit 到进度里（`preview` / `apply` 事件），前端直接展示。
+                let banned_emails: Vec<String> = val
+                    .get("bannedEmails")
+                    .and_then(|v| v.as_array())
+                    .map(|arr| {
+                        arr.iter()
+                            .filter_map(|v| v.as_str().map(|s| s.trim().to_lowercase()))
+                            .filter(|s| !s.is_empty())
+                            .collect()
+                    })
+                    .unwrap_or_default();
+
+                if !banned_emails.is_empty() && !cancel_check.load(Ordering::Relaxed) {
+                    emit(
+                        &app_run,
+                        serde_json::json!({
+                            "event": "banned",
+                            "emails": banned_emails,
+                        }),
+                    );
+                    let cfg_ban = match app_run.state::<AppState>().settings_snapshot().to_config() {
+                        Ok(c) => Some(c),
+                        Err(e) => {
+                            emit(
+                                &app_run,
+                                serde_json::json!({ "event": "error", "msg": format!("连接配置无效，跳过删除被封禁账号：{}", e) }),
+                            );
+                            None
+                        }
+                    };
+                    if let Some(cfg) = cfg_ban {
+                        let banned_for_task = banned_emails.clone();
+                        let app_ban_log = app_run.clone();
+                        let deleted = match tauri::async_runtime::spawn_blocking(move || -> Result<Vec<DeleteOutcome>, String> {
+                            let mut client = Sub2ApiClient::login(&cfg).map_err(|e| format!("{:#}", e))?;
+                            let accounts = client.list_accounts().map_err(|e| format!("{:#}", e))?;
+                            let logger = std::sync::Arc::new(move |msg: String| {
+                                let _ = app_ban_log.emit(EVENT, serde_json::json!({ "event": "log", "msg": msg }));
+                            });
+                            Ok(delete_banned_accounts(&mut client, &accounts, &banned_for_task, &logger))
+                        }).await {
+                            Ok(Ok(d)) => d,
+                            Ok(Err(e)) => {
+                                emit(&app_run, serde_json::json!({ "event": "error", "msg": format!("删除被封禁账号失败：{}", e) }));
+                                Vec::new()
+                            }
+                            Err(e) => {
+                                emit(&app_run, serde_json::json!({ "event": "error", "msg": format!("删除任务调度失败：{}", e) }));
+                                Vec::new()
+                            }
+                        };
+                        emit(
+                            &app_run,
+                            serde_json::json!({ "event": "deleted", "deleted": deleted }),
+                        );
+                    }
+                }
+
                 let cpa_output = val
                     .get("cpaPage")
                     .and_then(|v| v.get("output"))
