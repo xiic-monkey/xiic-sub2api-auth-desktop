@@ -15,6 +15,9 @@ use tauri::{AppHandle, Emitter, Manager, State};
 
 use sub2api_operator::browser;
 use sub2api_operator::commands::group::{group_accounts as operator_group_accounts, GroupResult};
+use sub2api_operator::commands::mail_ops;
+use sub2api_operator::commands::oauth_openai::{self as openai_oauth_cmd, OAuthOptions, OAuthReport};
+use sub2api_operator::mail::BindReport;
 use sub2api_operator::commands::reauth::{apply_value, delete_banned_accounts, ApplyReport, DeleteOutcome};
 use sub2api_operator::config::Config;
 use sub2api_operator::models::Account;
@@ -50,6 +53,16 @@ pub struct Settings {
     pub browser_engine: String,
     /// 单次重授权最长等待秒数
     pub max_seconds: u64,
+    /// 收码站地址（非 CDK 授权路径用）
+    pub mail_base_url: String,
+    /// 收码站用户名
+    pub mail_username: String,
+    /// 收码站密码
+    pub mail_password: String,
+    /// 非 CDK 授权是否使用有头窗口（Cloudflare 升级成交互式质询时可人工点一下）
+    pub openai_headed: bool,
+    /// 非 CDK 单账号最长等待秒数
+    pub openai_max_seconds: u64,
 }
 
 impl Default for Settings {
@@ -64,6 +77,11 @@ impl Default for Settings {
             cpa_url: "https://zh.kyon888.xyz/CPAandSub2API/".to_string(),
             browser_engine: "chrome".to_string(),
             max_seconds: 150,
+            mail_base_url: String::new(),
+            mail_username: String::new(),
+            mail_password: String::new(),
+            openai_headed: true,
+            openai_max_seconds: 240,
         }
     }
 }
@@ -89,6 +107,11 @@ impl Settings {
             gate_url: self.gate_url.trim().to_string(),
             cpa_url: self.cpa_url.trim().to_string(),
             max_seconds: self.max_seconds,
+            mail_base_url: self.mail_base_url.trim().to_string(),
+            mail_username: self.mail_username.trim().to_string(),
+            mail_password: self.mail_password.clone(),
+            openai_headed: self.openai_headed,
+            openai_max_seconds: self.openai_max_seconds,
         })
     }
 }
@@ -822,4 +845,119 @@ pub fn open_external(url: String) -> Result<(), String> {
 pub async fn ping() -> String {
     tokio::time::sleep(Duration::from_millis(1)).await;
     "pong".to_string()
+}
+
+// ---------------------------------------------------------------------------
+// 收码站：一键导入邮箱 + 非 CDK 一键授权
+// ---------------------------------------------------------------------------
+
+/// 一键把 sub2api 账号列表里的邮箱导入收码站。
+///
+/// 收码站按邮箱匹配它的总库，已导入过的会返回 `already_bound`，天然去重。
+#[tauri::command]
+pub async fn import_mail_emails(state: State<'_, AppState>) -> Result<BindReport, String> {
+    let settings = state.settings_snapshot();
+    let cfg = settings.to_config().map_err(|e| e.to_string())?;
+    let mail_cfg = cfg.mail_config();
+    if !mail_cfg.ready() {
+        return Err("请先在左侧「收码站」里填写站点地址、用户名、密码并保存".to_string());
+    }
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut client = Sub2ApiClient::login(&cfg).map_err(|e| format!("{:#}", e))?;
+        let log = |m: String| eprintln!("[import] {}", m);
+        mail_ops::import_emails(&mut client, &mail_cfg, true, &log).map_err(|e| format!("{:#}", e))
+    })
+    .await
+    .map_err(|e| format!("任务调度失败：{}", e))?
+}
+
+/// 非 CDK 一键授权：走 sub2api 生成的授权链接 + 收码站验证码。
+///
+/// 与 `start_reauth`（CDK 路径）共用同一个浏览器任务槽位，互斥执行。
+/// 进度通过 `reauth:event` 推送，最终结果走 `openai-oauth` 事件。
+#[tauri::command]
+pub async fn start_openai_reauth(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    emails: Vec<String>,
+) -> Result<usize, String> {
+    if state.job().is_some() {
+        return Err("已有浏览器任务在跑，请先等它结束或点「终止」".to_string());
+    }
+    let settings = state.settings_snapshot();
+    let cfg = settings.to_config().map_err(|e| e.to_string())?;
+    let engine = settings.browser_engine.clone();
+    browser::detect_executable(Some(&engine)).map_err(|e| format!("{:#}", e))?;
+
+    let selected: Vec<String> = emails
+        .into_iter()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect();
+    let mut opts = OAuthOptions::from_config(&cfg);
+    // 空列表 = 处理全部 401 账号
+    opts.only_emails = if selected.is_empty() { None } else { Some(selected.clone()) };
+    opts.yes = true;
+    opts.engine = Some(engine.clone());
+    // 连接设置里的「最长等待」对 CDK 路径生效；非 CDK 用收码站面板里那个
+    opts.max_seconds = cfg.openai_max_seconds;
+
+    let count = selected.len().max(1);
+    let cancel = Arc::new(AtomicBool::new(false));
+    state.set_job(cancel.clone());
+
+    tauri::async_runtime::spawn(async move {
+        let app_log = app.clone();
+        let app_step = app.clone();
+        let app_run = app.clone();
+        let hooks = browser::OAuthHooks {
+            log: Arc::new(move |l: String| {
+                emit(&app_log, serde_json::json!({ "event": "log", "msg": l }));
+            }),
+            step: Arc::new(move |step: &'static str, msg: String| {
+                emit(&app_step, serde_json::json!({ "event": "step", "step": step, "msg": msg }));
+            }),
+        };
+        let cancel_for_task = cancel.clone();
+        let res = tauri::async_runtime::spawn_blocking(move || {
+            openai_oauth_cmd::run_once(&cfg, &opts, Some(&cancel_for_task), &hooks)
+                .map_err(|e| format!("{:#}", e))
+        })
+        .await;
+
+        match res {
+            Ok(Ok(report)) => {
+                emit(
+                    &app_run,
+                    serde_json::json!({ "event": "openai-oauth", "result": report }),
+                );
+                let ok = report.outcomes.iter().any(|o| o.ok);
+                emit(
+                    &app_run,
+                    serde_json::json!({ "event": "exit", "code": 0, "success": ok }),
+                );
+            }
+            Ok(Err(e)) => {
+                let cancelled = e.contains("已取消");
+                emit(&app_run, serde_json::json!({
+                    "event": "error",
+                    "msg": if cancelled { "已取消".to_string() } else { e },
+                }));
+                emit(&app_run, serde_json::json!({ "event": "exit", "code": null, "success": false, "cancelled": cancelled }));
+            }
+            Err(e) => {
+                emit(&app_run, serde_json::json!({ "event": "error", "msg": e.to_string() }));
+                emit(&app_run, serde_json::json!({ "event": "exit", "code": null, "success": false }));
+            }
+        }
+        app_run.state::<AppState>().clear_job();
+    });
+
+    Ok(count)
+}
+
+// 让未使用的导入项保持显式（供类型文件与后续扩展）
+#[allow(dead_code)]
+fn _assert_report_type(r: &OAuthReport) -> usize {
+    r.outcomes.len()
 }

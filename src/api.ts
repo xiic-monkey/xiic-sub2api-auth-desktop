@@ -4,6 +4,7 @@ import type {
   AccountView,
   AppInfo,
   ApplyReport,
+  BindReport,
   CdkCheckResult,
   CdkMergeResult,
   CredentialView,
@@ -37,6 +38,13 @@ export const api = {
 
   checkCdkLeft: (cdk: string) => invoke<CdkCheckResult>("check_cdk_left", { cdk }),
   mergeCdk: (codes: string[]) => invoke<CdkMergeResult>("merge_cdk", { codes }),
+
+  /** 一键把 sub2api 账号邮箱导入收码站（服务端自带去重） */
+  importMailEmails: () => invoke<BindReport>("import_mail_emails"),
+
+  /** 非 CDK 一键授权：走 sub2api 授权链接 + 收码站验证码（空数组 = 全部 401 账号） */
+  startOpenaiReauth: (emails: string[]) =>
+    invoke<number>("start_openai_reauth", { emails }),
 
   openExternal: (url: string) => invoke<void>("open_external", { url }),
 };

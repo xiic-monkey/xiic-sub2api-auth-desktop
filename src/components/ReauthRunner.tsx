@@ -1,12 +1,16 @@
-import type { ApplyReport, FetchResult, ReauthEvent } from "../types";
+import type { ApplyReport, FetchResult, OAuthImportResult, ReauthEvent } from "../types";
 
 interface Props {
   emails: string[];
   running: boolean;
+  /** 非 CDK 一键授权是否在跑 */
+  oauthRunning: boolean;
   events: ReauthEvent[];
   result: FetchResult | null;
   report: ApplyReport | null;
+  oauthReport: OAuthImportResult | null;
   onStart: () => void;
+  onStartOAuth: () => void;
   onCancel: () => void;
   onClear: () => void;
   onOpenUrl: (url: string) => void;
@@ -26,6 +30,24 @@ const STEP_LABEL: Record<string, string> = {
   cpa: "CPA 转换",
   apply: "匹配账号并写回",
   applied: "写回完成",
+  // ---- 非 CDK 路径 ----
+  warmup: "有机预热（同域浏览）",
+  import: "导入邮箱到收码站",
+  code: "等待邮箱验证码",
+  exchange: "换取凭证",
+  consent: "等待授权确认",
+};
+
+/** 非 CDK 路径停在哪个阶段 —— 人类可读。 */
+const OAUTH_STAGE_LABEL: Record<string, string> = {
+  done: "授权完成",
+  need_code: "需人工填验证码",
+  need_password: "账号要密码",
+  blocked: "被风控拦下",
+  timeout: "超时",
+  cancelled: "已取消",
+  error: "出错",
+  exchange_failed: "换凭证失败",
 };
 
 function lineOf(e: ReauthEvent): { text: string; cls: string } | null {
@@ -66,10 +88,13 @@ function lineOf(e: ReauthEvent): { text: string; cls: string } | null {
 export default function ReauthRunner({
   emails,
   running,
+  oauthRunning,
   events,
   result,
   report,
+  oauthReport,
   onStart,
+  onStartOAuth,
   onCancel,
   onClear,
   onOpenUrl,
@@ -80,6 +105,7 @@ export default function ReauthRunner({
   const hasCpaOutput = !!result?.cpaPage?.output;
   // 一键流程：fetch 结束后后端会自动 preview + apply，这里只反映状态
   const applying = running && lastStep === "apply";
+  const busy = running || oauthRunning;
 
   return (
     <section className="runner">
@@ -87,22 +113,35 @@ export default function ReauthRunner({
         <span className="title">
           一键重授权
           <span className="tiny muted" style={{ marginLeft: 8, fontWeight: 400 }}>
-            {emails.length > 0 ? `已选 ${emails.length} 个邮箱` : "请先在上方勾选账号"}
+            {emails.length > 0 ? `已选 ${emails.length} 个邮箱` : "未勾选则处理全部 401 账号"}
           </span>
         </span>
-        {result && (
-          <button className="ghost" onClick={onClear} disabled={running}>
+        {(result || oauthReport) && (
+          <button className="ghost" onClick={onClear} disabled={busy}>
             清空结果
           </button>
         )}
-        {running ? (
+        {busy ? (
           <button className="danger" onClick={onCancel}>
             终止
           </button>
         ) : (
-          <button className="primary" onClick={onStart} disabled={emails.length === 0}>
-            开始重授权
-          </button>
+          <>
+            <button
+              className="primary"
+              onClick={onStartOAuth}
+              title="不消耗 CDK：sub2api 生成授权链接 → 浏览器填邮箱 → 收码站取验证码 → 换回凭证"
+            >
+              一键授权
+            </button>
+            <button
+              className="ghost"
+              onClick={onStart}
+              title="走接码门页消耗 CDK 的原有路径"
+            >
+              cdk授权
+            </button>
+          </>
         )}
       </div>
 
@@ -110,7 +149,8 @@ export default function ReauthRunner({
         <div className="timeline">
           {steps.length === 0 ? (
             <div className="tiny muted">
-              流程：门页 → 填 CDK 进入 → 填邮箱 → 获取令牌 → 轮询 → 复制全部 → CPA 转换 → 读输出
+              【一键授权】sub2api 授权链接 → 有机预热 → 填邮箱 → 收码站取码 → 换凭证 ｜
+              【cdk授权】门页 → 填 CDK → 填邮箱 → 获取令牌 → CPA 转换 → 写回
             </div>
           ) : (
             steps.map((s, i) => {
@@ -264,6 +304,66 @@ export default function ReauthRunner({
                   {report.outcomes.filter((o) => !o.ok).length} 失败。可回列表刷新查看状态。
                 </div>
               )}
+            </div>
+          )}
+        </div>
+      )}
+
+      {oauthReport && (
+        <div className="result-box">
+          <div className="row-between">
+            <span className="tiny">
+              <span className="badge dim">非 CDK 授权</span>{" "}
+              <span className="muted" style={{ marginLeft: 6 }}>
+                目标 {oauthReport.emails.length} 个账号 · 成功{" "}
+                {oauthReport.outcomes.filter((o) => o.ok).length}
+              </span>
+            </span>
+            <span className="tiny muted">
+              {oauthReport.imported
+                ? `邮箱导入：新增 ${oauthReport.imported.bound} · 已存在 ${oauthReport.imported.already_bound} · 未命中 ${oauthReport.imported.not_found}`
+                : `邮箱导入失败：${oauthReport.import_error ?? "未配置收码站"}`}
+            </span>
+          </div>
+
+          {oauthReport.imported && oauthReport.imported.missing.length > 0 && (
+            <details>
+              <summary className="tiny muted" style={{ cursor: "pointer" }}>
+                {oauthReport.imported.missing.length} 个邮箱不在收码站总库（读不到验证码）
+              </summary>
+              <div className="hint" style={{ marginTop: 6 }}>
+                {oauthReport.imported.missing.map((e, i) => (
+                  <div key={i}>· {e}</div>
+                ))}
+              </div>
+            </details>
+          )}
+
+          {oauthReport.outcomes.map((o) => (
+            <div className="plan" key={o.account_id}>
+              <div className="plan-head">
+                <span className="mono">#{o.account_id}</span>
+                <span className="muted">{o.email}</span>
+                <span className="spacer" />
+                <span className="badge dim">{OAUTH_STAGE_LABEL[o.stage] ?? o.stage}</span>
+                {o.ok ? (
+                  <span className="badge ok">已写回</span>
+                ) : (
+                  <span className="badge err" title={o.message}>
+                    未完成
+                  </span>
+                )}
+              </div>
+              <ul>
+                <li>{o.message}</li>
+              </ul>
+            </div>
+          ))}
+
+          {oauthReport.outcomes.some((o) => !o.ok) && (
+            <div className="hint">
+              被 Cloudflare / Sentinel 拦下的账号，可在左侧「收码站」勾选「使用有头窗口」后重试 ——
+              窗口会弹出来，手动点一次「验证您是真人」即可继续。
             </div>
           )}
         </div>

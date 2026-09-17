@@ -4,15 +4,17 @@ import type {
   AccountView,
   AppInfo,
   ApplyReport,
+  BindReport,
   CdkCheckResult,
   CdkMergeResult,
   CredentialView,
   EngineStatus,
   FetchResult,
+  OAuthImportResult,
   ReauthEvent,
   Settings,
 } from "./types";
-import SettingsPanel from "./components/SettingsPanel";
+import SettingsPanel, { MailPanel } from "./components/SettingsPanel";
 import CredentialPanel from "./components/CredentialPanel";
 import AccountTable from "./components/AccountTable";
 import ReauthRunner from "./components/ReauthRunner";
@@ -32,6 +34,11 @@ export default function App() {
   const [running, setRunning] = useState(false);
   const [result, setResult] = useState<FetchResult | null>(null);
   const [report, setReport] = useState<ApplyReport | null>(null);
+  /** 非 CDK 一键授权的最终报告 */
+  const [oauthReport, setOauthReport] = useState<OAuthImportResult | null>(null);
+  const [oauthRunning, setOauthRunning] = useState(false);
+  /** 最近一次「导入邮箱」的结果 */
+  const [bindReport, setBindReport] = useState<BindReport | null>(null);
 
   const [loading, setLoading] = useState(false);
   const [savingSettings, setSavingSettings] = useState(false);
@@ -40,6 +47,7 @@ export default function App() {
   const [checkingLeft, setCheckingLeft] = useState(false);
   const [merging, setMerging] = useState(false);
   const [grouping, setGrouping] = useState(false);
+  const [importing, setImporting] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
 
   const notify = useCallback((msg: string) => {
@@ -120,6 +128,14 @@ export default function App() {
           notify("合并失败");
         }
         setMerging(false);
+      } else if (e.event === "openai-oauth") {
+        // 非 CDK 一键授权完成
+        setOauthReport(e.result);
+        const ok = e.result.outcomes.filter((o) => o.ok).length;
+        const bad = e.result.outcomes.length - ok;
+        notify(`非 CDK 授权完成：成功 ${ok} / 失败 ${bad}`);
+        if (e.result.imported) setBindReport(e.result.imported);
+        void reloadAccounts();
       } else if (e.event === "banned") {
         notify(`检测到被封禁/停用账号：${e.emails.join(", ")}`);
       } else if (e.event === "deleted") {
@@ -131,6 +147,7 @@ export default function App() {
         notify(e.msg);
       } else if (e.event === "exit") {
         setRunning(false);
+        setOauthRunning(false);
         setCheckingLeft(false);
         setMerging(false);
       }
@@ -267,6 +284,7 @@ export default function App() {
   const clearResult = useCallback(() => {
     setResult(null);
     setReport(null);
+    setOauthReport(null);
     setEvents([]);
   }, []);
 
@@ -329,6 +347,42 @@ export default function App() {
     [notify]
   );
 
+  /** 一键把 sub2api 账号列表里的邮箱导入收码站（服务端自带去重，重复导入不会产生副本）。 */
+  const importMail = useCallback(async () => {
+    setImporting(true);
+    try {
+      const r = await api.importMailEmails();
+      setBindReport(r);
+      notify(
+        `导入完成：新增 ${r.bound} · 已存在 ${r.already_bound} · 总库未命中 ${r.not_found}（共 ${r.total}）`
+      );
+    } catch (e) {
+      notify(String(e));
+    } finally {
+      setImporting(false);
+    }
+  }, [notify]);
+
+  /** 非 CDK 一键授权：不消耗 CDK，走 sub2api 授权链接 + 收码站验证码。 */
+  const startOAuth = useCallback(async () => {
+    setEvents([]);
+    setResult(null);
+    setReport(null);
+    setOauthReport(null);
+    setOauthRunning(true);
+    try {
+      const n = await api.startOpenaiReauth(selectedEmails);
+      notify(
+        selectedEmails.length === 0
+          ? "已启动非 CDK 授权（全部 401 账号）"
+          : `已启动非 CDK 授权（${n} 个邮箱）`
+      );
+    } catch (e) {
+      setOauthRunning(false);
+      notify(String(e));
+    }
+  }, [selectedEmails, notify]);
+
   // ---------- 渲染 ----------
   const engineLabel =
     settings?.browser_engine === "chrome" ? "本机 Chrome" : "内置 Chromium";
@@ -379,6 +433,15 @@ export default function App() {
             </section>
           )}
 
+          {settings && (
+            <MailPanel
+              settings={settings}
+              onChange={setSettings}
+              onSave={saveSettings}
+              saving={savingSettings}
+            />
+          )}
+
           {creds && settings && (
             <CredentialPanel
               creds={creds}
@@ -409,6 +472,9 @@ export default function App() {
             onReload={reloadAccounts}
             onGroup={groupAccounts}
             grouping={grouping}
+            onImportMail={importMail}
+            importing={importing}
+            bindReport={bindReport}
             only401={only401}
             onOnly401Change={setOnly401}
             query={query}
@@ -418,10 +484,13 @@ export default function App() {
           <ReauthRunner
             emails={selectedEmails}
             running={running || checkingLeft || merging}
+            oauthRunning={oauthRunning || importing}
             events={events}
             result={result}
             report={report}
+            oauthReport={oauthReport}
             onStart={start}
+            onStartOAuth={startOAuth}
             onCancel={cancel}
             onClear={clearResult}
             onOpenUrl={openUrl}

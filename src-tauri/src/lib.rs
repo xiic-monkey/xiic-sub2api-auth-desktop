@@ -28,6 +28,8 @@ pub fn run() {
             commands::apply_result,
             commands::check_cdk_left,
             commands::merge_cdk,
+            commands::import_mail_emails,
+            commands::start_openai_reauth,
             commands::open_external,
             commands::ping,
         ])

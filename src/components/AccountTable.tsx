@@ -1,6 +1,6 @@
 import { useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import type { AccountView } from "../types";
+import type { AccountView, BindReport } from "../types";
 
 /** 每页账号数的可选范围（分组粒度）。 */
 const GROUP_SIZES = Array.from({ length: 20 }, (_, i) => i + 1);
@@ -15,6 +15,10 @@ interface Props {
   /** 按每页大小分组：按 id 升序分页，每页优先级设为页码 */
   onGroup: (pageSize: number) => void;
   grouping: boolean;
+  /** 一键把账号邮箱导入收码站（非 CDK 授权路径前置步骤） */
+  onImportMail: () => void;
+  importing: boolean;
+  bindReport: BindReport | null;
   only401: boolean;
   onOnly401Change: (v: boolean) => void;
   query: string;
@@ -30,6 +34,9 @@ export default function AccountTable({
   onReload,
   onGroup,
   grouping,
+  onImportMail,
+  importing,
+  bindReport,
   only401,
   onOnly401Change,
   query,
@@ -78,6 +85,11 @@ export default function AccountTable({
           账号列表
           <span className="tiny muted" style={{ marginLeft: 8, fontWeight: 400 }}>
             {accounts.length} 条{selected.size > 0 ? ` · 已选 ${selected.size}` : ""}
+            {bindReport
+              ? ` · 收码站已绑 ${bindReport.total}（本次新增 ${bindReport.bound}${
+                  bindReport.not_found > 0 ? `，未命中 ${bindReport.not_found}` : ""
+                }）`
+              : ""}
           </span>
         </span>
         <div className="actions">
@@ -105,6 +117,18 @@ export default function AccountTable({
             disabled={loading || grouping}
           >
             {grouping ? "分组中…" : "分组"}
+          </button>
+          <button
+            className="ghost"
+            onClick={onImportMail}
+            disabled={importing}
+            title={
+              bindReport
+                ? `上次导入：新增 ${bindReport.bound} · 已存在 ${bindReport.already_bound} · 总库未命中 ${bindReport.not_found}`
+                : "把账号列表里的邮箱批量导入收码站（服务端自动去重，重复导入不会产生副本）"
+            }
+          >
+            {importing ? "导入中…" : "一键导入邮箱"}
           </button>
           {showGroup &&
             popPos &&

@@ -10,6 +10,43 @@ export interface Settings {
   cpa_url: string;
   browser_engine: string;
   max_seconds: number;
+  /** 收码站地址（非 CDK 授权路径用） */
+  mail_base_url: string;
+  mail_username: string;
+  mail_password: string;
+  /** 非 CDK 授权使用有头窗口（Cloudflare 要求人工验证时可人工点一下） */
+  openai_headed: boolean;
+  /** 非 CDK 单账号最长等待秒数 */
+  openai_max_seconds: number;
+}
+
+/** 邮箱导入收码站的结果 */
+export interface BindReport {
+  total: number;
+  bound: number;
+  already_bound: number;
+  not_found: number;
+  newly_bound: string[];
+  missing: string[];
+  batches: number;
+}
+
+/** 非 CDK 单账号授权结果 */
+export interface OAuthAccountOutcome {
+  account_id: number;
+  email: string;
+  ok: boolean;
+  stage: string;
+  message: string;
+}
+
+/** 非 CDK 一键授权报告 */
+export interface OAuthImportResult {
+  emails: string[];
+  imported: BindReport | null;
+  import_error: string | null;
+  outcomes: OAuthAccountOutcome[];
+  applied: ApplyOutcome[];
 }
 
 export interface CredentialView {
@@ -138,6 +175,8 @@ export type ReauthEvent =
   | { event: "cdk-check"; result: CdkCheckResult }
   /** CDK 合并完成 */
   | { event: "cdk-merge"; result: CdkMergeResult }
+  /** 非 CDK 一键授权完成（sub2api 授权链接 + 收码站验证码） */
+  | { event: "openai-oauth"; result: OAuthImportResult }
   /** fetch 检测到账号被封禁/停用 */
   | { event: "banned"; emails: string[] }
   /** 已尝试从 sub2api 删除被封禁账号 */
